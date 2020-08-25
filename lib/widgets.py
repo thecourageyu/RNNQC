@@ -440,17 +440,23 @@ def DerivedTD(TT, RH):
     L = 2260 * 1000 # J/kg
     Rv = 461.5 # J/kg*K
     TD = -999
+    minval = 0.00001
+    
     if isinstance(TT, list) and isinstance(RH, list):
         if len(TT) == len(RH):
             TD = []
             nobs = len(TT)
             for loop in range(nobs):
+                if TT[loop] == 0:
+                    TT[loop] = minval
                 TD.append((1 / TT[loop] - math.log(RH[loop]) * Rv / L ) ** (-1))
         else: 
             print("Error: length of two list are not equal!")
             sys.exit(99)
     #elif isinstance(TT, np.ndarray) and isinstance(RH, np.ndarray):
     else:    
+        if TT == 0:
+            TT = minval
         TD = (1 / TT - math.log(RH) * Rv / L ) ** (-1)
         #print "TD = {0},  TT = {1},  RH = {2}".format(TD - 273.15, TT - 273.15, RH)
         

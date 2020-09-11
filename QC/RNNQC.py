@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[4]:
+# In[1]:
 
 
 from collections import deque, Counter
 from datetime import datetime, timedelta
 from fbprophet import Prophet
 from imblearn.under_sampling import ClusterCentroids
-from imblearn.under_sampling import RandomUnderSampler
+from imblearn.under_sampling import RandomUnderSampler, TomekLinks
 
 import argparse
 import calendar
@@ -23,18 +23,15 @@ import sys
 
 plt.style.use('ggplot')
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1" # first gpu"
 from tensorflow.keras.models import load_model
 from sklearn import preprocessing
 
-# import tensorflow as tf
+import tensorflow as tf
 # from tensorflow.keras import Input
 # from tensorflow.keras.models import Model, Sequential
 # from tensorflow.keras.layers import Bidirectional, Dense, GRU, LSTM
 # from tensorflow.keras import initializers, regularizers, constraints
 # from tensorflow.keras.callbacks import CSVLogger, EarlyStopping, LearningRateScheduler, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
-
-
 
 from lib.dgenerator import dgenerator
 from lib.mbuilder import NNBuilder, YZKError, WeightedBinaryCrossntropy
@@ -76,95 +73,6 @@ print(df)
 
 pda = dgenerator.series_to_supervised(df, n_in=2, n_out=1, dropnan=False, vnames=['v1', 'v2', 'v3'])
 print(pda)
-
-
-# # Config (for realtime QC)
-
-# In[ ]:
-
-
-# resd    = "/NAS-DS1515P/users1/T1/res"
-# ind     = "/NAS-DS1515P/users1/realtimeQC/ftpdata"
-# cmpltd  = ind
-# parsed  = "/NAS-DS1515P/users1/realtimeQC/parsed"
-# mloutd  = "/NAS-DS1515P/users1/realtimeQC/ml"
-# rtqc    = False
-# # tperiod = [201912010000, 202005202350]
-# tperiod = [202005100000, 202005202350]
-# cwbfmt  = ".QPESUMS_STATION.10M.mdf"
-# autofmt = ".QPESUMS_STATION.15M.mdf"
-# pfmt  = ".QPESUMS_STATION.txt"
-
-# ds = [parsed, mloutd]
-# ds.append(parsed)
-# ds.append("{0}/LSTM_1".format(mloutd))
-
-# for tmpd in ds:
-#     if not os.path.exists(tmpd):
-#         os.makedirs(tmpd)
-
-
-# In[ ]:
-
-
-# raw_gi, raw_id, nstn = getGI("{0}/stations.txt".format(resd))
-
-
-# In[ ]:
-
-
-# qcdtimes = mdfinspector(ind, cmpltd, rtqc, tperiod, cwbfmt, autofmt)
-
-
-# In[ ]:
-
-
-# nsize = len(qcdtimes)
-# darray = np.ndarray(shape=(nsize, nstn, 4))  # Temp, RH, Pres, Precp
-# darray.fill(-999)
-
-
-# In[ ]:
-
-
-# start_date = datetime.strptime(str(qcdtimes[0]), "%Y%m%d%H%M")
-# end_date   = datetime.strptime(str(qcdtimes[-1]), "%Y%m%d%H%M")
-# print(start_date, end_date)
-
-
-# # Config (for historical data)
-
-# In[ ]:
-
-
-# ind = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
-# logd = "/home/yuzhe/DataScience/QC/log"
-# npyd = "/home/yuzhe/DataScience/dataset"
-
-# if not os.path.exists(logd):
-#     os.makedirs(logd)
-
-# if not os.path.exists(npyd):
-#     os.makedirs(npyd)
-    
-# tperiod_train = [2012010101, 2015123124]
-# tperiod_test  = [2016010101, 2016123124]
-
-# # stninfo = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/RR_analysis_grid_stationlist.txt"
-# stninfo = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
-
-# # raw_id = textloader.get_id(stninfo)
-
-# hrdg = dgenerator(ind=ind, gif=stninfo, npyd=npyd)
-# hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
-# hrfs_test  = hrdg.hrfgenerator(tperiod_test, n_in=6, n_out=1, mode="test", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
-
-
-# In[ ]:
-
-
-# print(hrfs_train[0].shape, hrfs_train[3].shape)
-# print(hrfs_test[0].shape, hrfs_test[3].shape)
 
 
 # # LSTM with multiple lag timesteps
@@ -233,71 +141,87 @@ print(pda)
 # print(sorted(Counter(y_resampled).items()))
 
 
-# In[ ]:
-
-
-
-# from imblearn.under_sampling import RandomUnderSampler
-# rus = RandomUnderSampler(random_state=0)
-# X_resampled, y_resampled = rus.fit_resample(X, y)
-# print(sorted(Counter(y_resampled).items()))
-
-
-# In[ ]:
-
-
-# 雨量假設已經被Ｑ出來後
-# 再用前後10
-
-
 # # Train
 
-# In[ ]:
+# In[2]:
 
 
-def train(X_train, y_train, epochs, batch_size, mconf, loss="mae", modeld="model", ckptd="ckpt", name="NN", earlystopper=True, lossw=None):
+def ratio_multiplier(y):
     '''
-        X: [nsize, nstn, timestep, feature]
-        y: [nsize, nstn, features]
-        mconf: {name, units, inshape, outshape, outactfn, batchNormalization, dropouts, activations}
+        multiplier: resampling ratio of sample for some classes
+    '''
+    
+    multiplier={0: 0.075, 1: 0.95}
+    
+    target_stats = Counter(y)
+    for key, value in target_stats.items():
+        if key in multiplier:
+            target_stats[key] = int(value * multiplier[key])
+    return target_stats
+
+
+# In[3]:
+
+
+# def train(X_train, y_train, epochs, batch_size, mconf, loss="mae", modeld="model", ckptd="ckpt", name="NN", earlystopper=True, lossw=None):
+
+def train(X_train, y_train, epochs, batch_size, mconf, modeld="model", ckptd="ckpt", name="NN"):
+    '''
+        positional:
+            X_train: array with shape [nsize, nstn, timestep, feature]
+            y_train: [nsize, nstn, features]
+            epochs
+            batch_size
+            mconf: {name, units, inshape, outshape, outactfn, loss, lossw, metric, batchNormalization, dropouts, activations, earlystopper, dropout, recurrent_dropout}
     '''
 
+    loss = mconf["loss"]
     if isinstance(loss, str):
         loss = [loss]
     
     timesteps = X_train.shape[1]
     nfeatures = X_train.shape[2]
     
-#     timesteps = 6
-#     nfeatures = 4
-
     NN = NNBuilder(modeld=modeld, ckptd=ckptd, name=name)
     if mconf["name"] == "DNNLSTM":
-        LSTM, callbacks_, optimizer_ = NN.DNNLSTM(mconf["units"], inshape=(timesteps, nfeatures), outshape=mconf["outshape"], outactfn=mconf["outactfn"], dropouts=mconf["dropouts"], activations=mconf["activations"])
+        model, callbacks_, optimizer_ = NN.DNNLSTM(units=mconf["units"], inshape=(timesteps, nfeatures), outshape=mconf["outshape"], outactfn=mconf["outactfn"], dropouts=mconf["dropouts"], activations=mconf["activations"])
     elif mconf["name"] == "stackedLSTM":
-        LSTM, callbacks_, optimizer_ = NN.stackedLSTM(shape=(timesteps, nfeatures), cells=mconf["units"])
+        model, callbacks_, optimizer_ = NN.stackedLSTM(cells=mconf["units"], inshape=(timesteps, nfeatures), outshape=mconf["outshape"], outactfn=mconf["outactfn"], dropout=mconf["dropout"], recurrent_dropout=mconf["recurrent_dropout"])
+    elif mconf["name"] == "CNN1D":
+        model, callbacks_, optimizer_ = NN.CNN1D(filters=mconf["units"], inshape=(timesteps, nfeatures), outshape=mconf["outshape"], outactfn=mconf["outactfn"], activations=mconf["activations"])
     else:
         logging.warning("model name undefined.")
         
-    LSTM.summary()
-        
-    if len(mconf["outactfn"]) == len(mconf["outshape"]) == 2:
+    model.summary()
+    
+    if "metric" not in mconf.keys():
+        mconf["metric"] = ["mae", tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+    
+    if "outactfn" in mconf.keys() and len(mconf["outactfn"]) == len(mconf["outshape"]) == 2:
+        lossw = mconf["lossw"]
         if lossw is None:
             lossw = [1, 1]
-        LSTM.compile(loss={"regression_output": loss[0], "classification_output": loss[1]},
-                     loss_weights={"regression_output": lossw[0], "classification_output": lossw[1]},
-                     metrics={"regression_output": "mae", "classification_output": "accuracy"},
-                     optimizer=optimizer_)
+            
+        model.compile(loss={"Loss1": loss[0], "Loss2": loss[1]},
+                      loss_weights={"Loss1": lossw[0], "Loss2": lossw[1]},
+                      metrics={"Loss1": mconf["metric"][0], "Loss2": mconf["metric"][1]},
+                      optimizer=optimizer_)
     else:
-        LSTM.compile(loss=loss[0], optimizer=optimizer_)
+        model.compile(loss=loss[0], metrics={"Loss1": mconf["metric"][0]}, optimizer=optimizer_)
 
     
 #     callbacks_ = checkpointer, earlystopper, reduceLR, tb, csvlogger
     
-    if not earlystopper:
+    if not mconf["earlystopper"]:
         callbacks_.pop(1)
+        
+    if isinstance(y_train, list):
+        logging.info("train-47, shape of y_train[0]: {}, y_train[1]: {}".format(y_train[0].shape, y_train[1].shape))
+        
+        
+#     history = model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, callbacks=callbacks_, validation_split=0.3, verbose=1, shuffle=False)
+    history = model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, callbacks=callbacks_, validation_split=0.3, verbose=1, shuffle=True)
 
-    history = LSTM.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, callbacks=callbacks_, validation_split=0.1, verbose=2, shuffle=True)
 #     history = LSTM.fit(x=dg, epochs=epochs, batch_size=batch_size, callbacks=callbacks_, verbose=2, shuffle=True)
 
     fig, ax = plt.subplots()
@@ -313,7 +237,7 @@ def train(X_train, y_train, epochs, batch_size, mconf, loss="mae", modeld="model
 
 # # Fine Tune
 
-# In[6]:
+# In[4]:
 
 
 def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", ckptd="ckpt"):
@@ -347,26 +271,15 @@ def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", 
     return history
 
 
-# In[7]:
+# In[5]:
 
 
 # hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
 
 
-# # Data Balance
-
-# In[8]:
-
-
-# saved_model = "/home/yuzhe/DataScience/QC/model/lstm1_0154_0.009_0.008_202008071814.hdf5"
-# epochs = 1500
-# batchsize = 100
-# finetune(X_finetune, y_finetune, epochs, batchsize, saved_model, modeld="model", ckptd="ckpt")
-
-
 # # Test
 
-# In[9]:
+# In[5]:
 
 
 def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
@@ -493,13 +406,13 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
     return [seidx, seidx_]
 
 
-# In[14]:
+# In[6]:
 
 
-def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd, custom_objects=None):
+def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom_objects=None, classify=None):
     '''
         X: [nsize, nstn, timestep, feature]
-        y: [nsize, nstn, features]
+        y: [nsize, nstn, feature]
         vinfo: DataFrame
                  Temp      RH    Pres   Precp
             _________________________________
@@ -508,136 +421,143 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd, custom_obje
         scaler: inverse transform values from output layer
     '''
     
-    print(type(X), type(y_))
     y = y_
-    if len(y_) == 2:
+    if isinstance(y_, list) and len(y_) >= 2:
+        logging.debug("len(y_) = {} in test().".format(len(y_)))
         y = y_[0]
+    
+    logging.debug("shape of X = {} in test().".format(X.shape))
+    logging.debug("shape of y = {} in test().".format(y.shape))
+
     
     nsize = len(datetimes)
     assert nsize == X.shape[0] == y.shape[0]
+    
     nstn = len(stnids)
     assert nstn == X.shape[1] == y.shape[1]
-    timestep = X.shape[2]
-    nfeature = y.shape[2]
     
-#     mname = "LSTM1_woDB_MAE"
-#     outd = "/NAS-129/users1/T1/DATA/RNN/QC/{}".format(mname)
-       
-#     vinfo = pd.DataFrame(hrdg.vrange)
+    timestep = X.shape[2]
+    nfeature = X.shape[3]
+    
+    y_out = np.ndarray((nsize, nstn, y.shape[2]))
+    
     vnames = vinfo.columns.tolist()
     vrange = vinfo.values
-#     scaler = preprocessing.MinMaxScaler()
 
-
-    if isinstance(scaler, preprocessing.MinMaxScaler):
-        scaler.fit(vrange)
-    
-    
-    for product in ["pred", "perfeval"]:
-        if product == "perfeval":
-            for vname in vnames:
-                outd_ = "{}/{}/{}".format(outd, product, vname)
+#     if isinstance(scaler, preprocessing.MinMaxScaler):
+#         scaler.fit(vrange)
+        
+    if outd is not None:
+        for product in ["pred", "perfeval"]:
+            if product == "perfeval":
+                for vname in vnames:
+                    outd_ = "{}/{}/{}".format(outd, product, vname)
+                    if not os.path.exists(outd_):
+                        os.makedirs(outd_)
+            else:
+                outd_ = "{}/{}".format(outd, product)
                 if not os.path.exists(outd_):
                     os.makedirs(outd_)
-        else:
-            outd_ = "{}/{}".format(outd, product)
-            if not os.path.exists(outd_):
-                os.makedirs(outd_)
 
     if custom_objects is not None:
         model = NNBuilder.mloader(saved_model, custom_objects=custom_objects)
-#         model = load_model(saved_model, custom_objects=custom_objects)
     else:
         model = NNBuilder.mloader(saved_model)
-#         model = load_model(saved_model)
 
     model.summary()
 
-    merrors = {"ids":[], "errors": []}
+#     merrors = {"ids": [], "errors": []}
+    merrors = {"ids": []}
+    for v_ in vnames:
+        merrors[v_] = []
+        
     for idx_, stnid_ in enumerate(stnids):
 
         y_pred = model.predict(X[:, idx_, :, :])
-        if len(y_pred) == 2:
+        if len(y_pred) == 2: 
             y_pred = y_pred[0]
-        y_pred = scaler.inverse_transform(y_pred)
+#             if classify is not None:            
+#                 steps = 
+        
+        if classify is not None:
+            y_pred = scaler.inverse_transform(y_pred)
+            
         y_true = y[:, idx_, :]
-
-        ypdf = pd.DataFrame(y_pred, columns=["{}_pred".format(vname) for vname in vnames])
-        ytdf = pd.DataFrame(y_true, columns=["{}_true".format(vname) for vname in vnames])
-        outdf = pd.concat([ytdf, ypdf], axis=1)
-        outdf.index = datetimes
-        outdf.to_csv("{}/pred/{}.csv".format(outd, stnid_))
-
-        outnp = outdf.values
-        errnp = np.apply_along_axis(lambda x: x[nfeature:] - x[0:nfeature], 1, outnp)
-        errv  = np.nanmean(errnp, axis=0)
-        merrors["ids"].append(stnid_)
-        merrors["errors"].append(errv)
         
-        datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
+        y_out[:, idx_, :] = y_pred
 
-        y_true = y_true[~np.isnan(y_pred).any(axis=1)]
-        datetimes_ = datetimes_[~np.isnan(y_pred).any(axis=1)]
-        y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
+        logging.info("test-76, shape of y_true = {} in test().".format(y_true.shape))
+        logging.info("test-77, shape of y_pred = {} in test().".format(y_pred.shape))
+        logging.info("test-78, shape of y_out  = {} in test().".format(y_out.shape))
 
-        y_pred = y_pred[~np.isnan(y_true).any(axis=1)]
-        datetimes_ = datetimes_[~np.isnan(y_true).any(axis=1)]
-        y_true = y_true[~np.isnan(y_true).any(axis=1)]
+        if outd is not None:
 
-        datetimes_ = datetimes_.ravel().tolist()
-        
-        if len(datetimes_) <= 0: 
-            logging.warning("sample size of {} = {}".format(stnid_, len(datetimes_)))
-            continue
-        
-        seidx = dtimes2mnseidx(datetimes_)
-        seidx = seidx[1]
-        print(seidx.index.tolist())
+            ypdf = pd.DataFrame(y_pred, columns=["{}_pred".format(vname) for vname in vnames])
+            ytdf = pd.DataFrame(y_true, columns=["{}_true".format(vname) for vname in vnames])
+            outdf = pd.concat([ytdf, ypdf], axis=1)
+            outdf.index = datetimes
+            outdf.to_csv("{}/pred/{}.csv".format(outd, stnid_))
 
-        for vidx, vname in enumerate(vnames):
-            for Ym in seidx.index.tolist():
-                idx1, idx2 = seidx.loc[Ym]
-                if idx2 - idx1 <= 10:
-                    logging.warning("idx1 = {}, idx2 = {} for {} on {}".format(idx1, idx2, stnid_, Ym))
-                    continue
+            outnp = outdf.values
+    #         errnp = np.apply_along_axis(lambda x: x[nfeature:] - x[0:nfeature], 1, outnp)
+            errnp = np.apply_along_axis(lambda x: x[len(vnames):] - x[0:len(vnames)], 1, outnp)
+            errv  = np.nanmean(errnp, axis=0)
+            merrors["ids"].append(stnid_)
+    #         merrors["errors"].append(errv)
 
-                title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])
-                xposi = np.arange(idx2 - idx1 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
-                xlabel = [datetimes_[i] for i in xposi]
+            for vidx, v_ in enumerate(vnames):
+                merrors[v_].append(errv[vidx])
 
-                kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel}
-                print(title)
-                pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+            datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
 
-    
-    merrors["ids"].append("total")
-    merrors["errors"].append(sum(merrors["errors"]) / len(merrors["errors"]))
-    merrors = pd.DataFrame(merrors)
-    merrors.to_csv("{}/pred/{}.csv".format(outd, "error_check"))
+            y_true = y_true[~np.isnan(y_pred).any(axis=1)]
+            datetimes_ = datetimes_[~np.isnan(y_pred).any(axis=1)]
+            y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
 
+            y_pred = y_pred[~np.isnan(y_true).any(axis=1)]
+            datetimes_ = datetimes_[~np.isnan(y_true).any(axis=1)]
+            y_true = y_true[~np.isnan(y_true).any(axis=1)]
 
-# In[15]:
+            datetimes_ = datetimes_.ravel().tolist()
 
+            if len(datetimes_) <= 0: 
+                logging.warning("sample size of {} = {}".format(stnid_, len(datetimes_)))
+                continue
 
-a = np.random.random_sample((100, 8))
-a[np.random.randint(0, high=100, size=10), 3] = np.nan
-# a[~np.isnan(a).any(axis=1]
-# print(a)
-err = np.apply_along_axis(lambda x: x[4:] - x[0:4], 1, a)
-np.nanmean(err, axis=0)
+            seidx = dtimes2mnseidx(datetimes_)
+            seidx = seidx[1]
+
+            for vidx, vname in enumerate(vnames):
+                for Ym in seidx.index.tolist():
+                    idx1, idx2 = seidx.loc[Ym]
+                    if idx2 - idx1 <= 10:
+                        logging.warning("idx1 = {}, idx2 = {} for {} on {}".format(idx1, idx2, stnid_, Ym))
+                        continue
+
+                    title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])
+                    xposi_ = np.arange(idx1, idx2 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
+                    xlabel = [datetimes_[i] for i in xposi_]
+                    xposi = np.arange(idx2 - idx1 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
+
+                    if classify is not None:
+                        kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel, "classify": classify}
+                    else:
+                        kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel}
+                    pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+
+    if outd is not None:
+        merrors["ids"].append("total")
+    #     merrors["errors"].append(sum(merrors["errors"]) / len(merrors["errors"]))
+        for vidx, v_ in enumerate(vnames):
+            merrors[v_].append(np.nanmean(np.array(merrors[v_])))
+        merrors = pd.DataFrame(merrors)
+        merrors.to_csv("{}/pred/{}.csv".format(outd, "error_check"), index=False)
+
+    return y_out
 
 
 # In[ ]:
 
-
-a = [1, 3, 4, 5, 6, 52, 23]
-sum(a) / len(a)
-
-
-# In[ ]:
-
-
-[3.24645079e-01-2.01605185e-01, 1.31765173e-01-8.76716946e-01, 3.18778015e-01 - 2.46106415e-02, 8.81898038e-01 - 2.61233422e-01]
 
 
 # # LSTM with 60 cells and io with 4 features
@@ -648,20 +568,75 @@ sum(a) / len(a)
 # - parameters of cell states (with bias)  = 4 * 60 + 60 + 60 * 60
 # - parameters of output layer (with bias) = 60 * 4 + 4
 
-# In[43]:
+# In[46]:
 
 
 def main(mode, tperiod, gif,
-         db=True, n_in=6, n_out=1, dsrc="hrf", 
-         mname="NN", mconf=None, epochs=100, batchsize=100, loss="mae", lossw=None,
-         ind=None, npyd=None, npysuffix=None, generator=False, 
-         saved_model=None, evald=None, custom_objects=None):
+         db=True, n_in=6, n_out=1, dsrc="hrf", vinfo=None, 
+         mname="NN", mconf=None, epochs=100, batchsize=100,
+         ind=None, npyd=None, rescale=True, npysuffix=None, generator=False, 
+         saved_model=None, evald=None, custom_objects=None, classify=None, sampler="rus"):
+    
+    '''
+        1. mode:
+            - train
+            - test
+            - finetune
+            
+        2. mname: name for saved model (training stage) or subdirectory of output "{}/{}".format(evald, mname) (testing stage) 
+        
+        3. mconf: a dict, 
+        ex. 
+            mconf = {
+                "name": "DNNLSTM", 
+                "units": [10, 30, 10, 30], 
+                "outactfn": ["tanh", "sigmoid"],
+                "outshape": [4, 1],
+                "loss": ["mae", "categorical_crossentropy"],
+                "lossw": [1, 1],                                    (default is None)
+                "metric": ["mae", "accuracy"],                      (optional)
+                "dropouts": 0.25 or a list, 
+                "activations": "relu" or a list,
+                "earlystopper": True,                               (default is True) 
+                "task": "classification"}                           (optional)
+
+        4. rescale:
+            - if rescale is not None == True == "Standard", then scaler is StandardScaler
+            - if rescale is not None == "MinMax", then scaler is MinMaxScaler
+            
+        5. vinfo: what variables to evaluate loss for regression and set range for inverse transform from normalization
+        
+        6. classify: [[idx1, idx2, ...], [[values for classifing], [], ...]]
+            ex.
+                [[0, 3], [[-5, 0, 5, 10, 15], [0, 10, 20, 30, 40]]]
+                0 to Temp, 3 to Precp         
+    '''
+    
+    nfeature = 4
     
     dg = dgenerator(ind=ind, gif=gif, npyd=npyd)
-    vinfo = pd.DataFrame(dg.vrange)
     
-    if mode == "test" and not os.path.exists(evald):
-        os.makedirs(evald)
+#     vinfo = pd.DataFrame(dg.vrange)
+    _vinfo = dg.vrange
+    if vinfo is None:
+        vinfo = _vinfo
+    else:
+        vinfo = pd.DataFrame(vinfo)
+    
+    _vnames = _vinfo.columns.tolist()
+    _vrange = _vinfo.values
+    
+    vnames = vinfo.columns.tolist()
+
+    vmapping = [_vnames.index(i) - len(_vnames) for i in vnames]
+    
+    logging.info("main-57: vnames  : {}".format(vnames))
+    logging.info("main-58: _vnames : {}".format(_vnames))
+    logging.info("main-59: vmapping: {}".format(vmapping))
+    
+    if evald is not None:
+        if mode == "test" and not os.path.exists(evald):
+            os.makedirs(evald)
     
     if npyd is not None:
         fnpy = True
@@ -673,93 +648,193 @@ def main(mode, tperiod, gif,
             npysuffix = mode 
             
         if mode == "test":
-            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=True, reformat=True, vstack=False, fnpy=fnpy, generator=False)
+            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, fnpy=fnpy, generator=False, classify=classify)
         else:
             # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
-            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=True, reformat=True, vstack=True, fnpy=fnpy, generator=False)
-    else:
-        pass
-
-    datetimes = dataset[1]
-    stnids = dataset[2]
-    nsize = len(datetimes)
-    nstn = len(stnids)
+            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, fnpy=fnpy, generator=False, classify=classify)
+    elif dsrc == "mdf":
+        if npysuffix is None:
+            npysuffix = mode 
             
+        vrange = {"Temp": [-20.0, 50.0],
+                  "RH": [0.0, 1.0],
+                  "Pres": [600.0, 1100.0],
+                  "Precp": [0.0, 220.0]}
     
-    logging.info("# of datetimes = {}".format(nsize))
-    logging.info("# of stations = {}".format(nstn))
+        dg.vrange = pd.DataFrame(vrange)
+
+        if mode == "test":
+            dataset = dg.mdfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, fnpy=fnpy, generator=False, classify=classify)
+        else:
+            # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
+            dataset = dg.mdfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, fnpy=fnpy, generator=False, classify=classify)
+    else:
+        logging.error("main-100: data source must be hrf or mdf.")
+        
+    datetimes = dataset[-4]
+    stnids    = dataset[-3]
+    nsize     = len(datetimes)
+    nstn      = len(stnids)
+    
+    logging.info("main-108: # of datetimes = {}".format(nsize))
+    logging.info("main-109: # of stations = {}".format(nstn))
+    logging.info("main-110, vnames: {}, vrange: {}.".format(dg.vnames, dg.vrange))
+    logging.info("main-111: # of dataset[0] = {} (rescaled data)".format(dataset[0].shape))
+        
+    if classify is not None:
+        logging.info("main-115: # of dataset[1] = {} (class labels)".format(dataset[1].shape))
     
     if mode == "test":
-        X = np.reshape(dataset[0][:, :, 0:-4], (-1, nstn, n_in, 4))
+        X = np.reshape(dataset[0][:, :, 0:-nfeature], (-1, nstn, n_in, nfeature))
         y = dataset[-2]
+        logging.debug("main-101: shape of y = {} in main().".format(y.shape))
+        if vinfo is not None:
+            y = dataset[-2][:, :, vmapping]
+            logging.debug("shape of y = {} if vinfo is not None in main().".format(y.shape))
     else:
-        if db:
         
-            scaled = np.reshape(dataset[0], (-1, n_in + n_out, 4))
-            nsize_ = scaled.shape[0]
-            y_class = np.zeros(nsize_)
-            logging.debug("shape of scaled: {}".format(scaled.shape))
+        if "lossw" not in mconf.keys():
+            mconf["lossw"] = None
 
-            precp_ = scaled[:, :, 3]
-            scaled0precp = precp_.min()
+        if "earlystopper" not in mconf.keys():
+            mconf["earlystopper"] = True
+
+        if "dropout" not in mconf.keys():
+            mconf["dropout"] = 0
+
+        if "recurrent_dropout" not in mconf.keys():
+            mconf["recurrent_dropout"] = 0
+        
+        if classify is not None:
+            assert dataset[0].shape[0] == dataset[1].shape[0]
+            y_class = dataset[1][:, classify[0][0]]  # only one variable classification, ex. 3 for precp
             
-            rains = np.zeros((nsize_), dtype=np.int)
-#             rains[np.where(dataset[0][:, -1] > 0)] = 1
-            rains[np.where(dataset[0][:, -1] > scaled0precp)] = 1
-
-            rains = np.reshape(rains, (-1, 1))
+            print("main-127: \n", y_class[0:10])
             
-            
-#             nminority = precp_[np.any(precp_ != 0, axis=1)].shape[0]
-            nminority = precp_[np.any(precp_ != scaled0precp, axis=1)].shape[0]
+            if db:
 
-            nmajority = nsize_ - nminority
-#             y_class[np.any(precp_ != 0, axis=1)] = 1
-            y_class[np.any(precp_ != scaled0precp, axis=1)] = 1
-            logging.debug("rain : others = {} : {} = {} : {}".format(nminority, nmajority, nminority / nminority, nmajority / nminority))
+    #             scaled = np.reshape(dataset[0], (-1, n_in + n_out, nfeature))  # [nsize, n_in + n_out, nfeature]
+    #             nsize_ = scaled.shape[0]
+    #             y_class = np.zeros(nsize_)
+    #             logging.debug("shape of scaled: {}".format(scaled.shape))
 
-            clscounter = Counter(y_class)
-            for key_ in clscounter.keys(): 
-                logging.debug("class (scaled): {}, nclass: {}\n".format(key_, clscounter[key_]))
+    #             precp_ = scaled[:, :, 3]
+    #             scaled0precp = precp_.min()
 
-            rus = RandomUnderSampler(random_state=0) 
-            print(dataset[0].shape, rains.shape)
-            X_resampled, y_resampled = rus.fit_resample(np.hstack([dataset[0], rains]), y_class)  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * 4)
+    #             rains = np.zeros((nsize_), dtype=np.int)
+    ##             rains[np.where(dataset[0][:, -1] > 0)] = 1
+    #             rains[np.where(dataset[0][:, -1] > scaled0precp)] = 1
 
-            clscounter = Counter(y_resampled)
-            for key_ in clscounter.keys(): 
-                logging.debug("class (resampled): {}, nclass: {}\n".format(key_, clscounter[key_]))
+    #             rains = np.reshape(rains, (-1, 1))
 
-            if mconf["name"] == "DNNLSTM" and len(mconf["outactfn"]) == len(mconf["outshape"]) == 2:
-                X = np.reshape(X_resampled[:, :-5], (-1, n_in, 4))
-                y = [X_resampled[:, -5:-1], X_resampled[:, -1]]
+
+    ##             nminority = precp_[np.any(precp_ != 0, axis=1)].shape[0]
+    #             nminority = precp_[np.any(precp_ != scaled0precp, axis=1)].shape[0]
+
+    #             nmajority = nsize_ - nminority
+    ##             y_class[np.any(precp_ != 0, axis=1)] = 1
+    #             y_class[np.any(precp_ != scaled0precp, axis=1)] = 1
+    #             logging.debug("rain : others = {} : {} = {} : {}".format(nminority, nmajority, nminority / nminority, nmajority / nminority))
+
+                clscounter = Counter(y_class)
+                for key_ in clscounter.keys(): 
+                    logging.info("main-141, class (scaled): {}, nclass: {}".format(key_, clscounter[key_]))
+
+    #             rus = RandomUnderSampler(random_state=0) 
+    
+                if sampler == "tl":
+                    s = TomekLinks(sampling_strategy=[0])
+                else:
+                    s = RandomUnderSampler(sampling_strategy=ratio_multiplier) 
+                
+                X_resampled, y_resampled = s.fit_resample(dataset[0], y_class)  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * 4)
+                
+
+    #             if classify is not None:
+    #                 assert len(mconf["outactfn"]) == len(mconf["outshape"]) == 2
+    #                 X_resampled, y_resampled = rus.fit_resample(np.hstack([dataset[0], rains]), y_class)  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * 4)
+    #             else:
+    #                 X_resampled, y_resampled = rus.fit_resample(dataset[0], y_class)  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * 4)
+
+
+                y_class = pd.DataFrame({"y_class": y_resampled})
+                y_onehot = pd.get_dummies(y_class["y_class"]).values
+
+                print("main-173: \n", y_onehot[0:10, :])
+
+                clscounter = Counter(y_resampled)
+                for key_ in clscounter.keys(): 
+                    logging.info("main-161, class (resampled): {}, nclass: {}".format(key_, clscounter[key_]))
+
+                X = np.reshape(X_resampled[:, :-nfeature], (-1, n_in, nfeature))
+
+
+    #             if len(mconf["outactfn"]) == len(mconf["outshape"]) == 2:
+    #                 X = np.reshape(X_resampled[:, :-5], (-1, n_in, 4))
+
+    #                 if vinfo is None:
+    #                     y = [X_resampled[:, -5:-1], X_resampled[:, -1]]
+    #                 else:
+    #                     y = [X_resampled[:, vmapping], X_resampled[:, -1]]
+    #             else:
+    #                 X = np.reshape(X_resampled[:, :-nfeature], (-1, n_in, nfeature))
+    #                 if vinfo is None:
+    #                     y = X_resampled[:, -nfeature:]
+    #                 else:
+    #                     y = X_resampled[:, vmapping]
+            else:        
+                X = np.reshape(dataset[0][:, :-nfeature], (-1, n_in, nfeature))
+                X_resampled = X
+                y_resampled = y_class
+
+
+            y_class = pd.DataFrame({"y_class": y_resampled})
+            y_onehot = pd.get_dummies(y_class["y_class"]).values
+                    
+            if "task" in mconf.keys() and mconf["task"] == "classification":
+                y = y_onehot
+                logging.info("main-202: shape, X: {}, y: {}".format(X.shape, y.shape))
             else:
-                X = np.reshape(X_resampled[:, :-4], (-1, n_in, 4))
-                y = X_resampled[:, -4:]
+                assert len(mconf["outactfn"]) == len(mconf["outshape"]) == 2
+                if vinfo is None:
+                    y = [X_resampled[:, -nfeature:], y_onehot]
+                else:
+                    y = [X_resampled[:, vmapping], y_onehot]
 
-            logging.debug("shape, X: {}, y: {}, {}".format(X.shape, y[0].shape, y[1].shape))
+                logging.info("main-210: shape, X: {}, y: {}, {}".format(X.shape, y[0].shape, y[1].shape))
 
-        else:        
-            X = np.reshape(dataset[0][:, :-4], (-1, n_in, 4))
-            y = dataset[0][:, -4:]
+        else:
+            ###### only regression 
+            X = np.reshape(dataset[0][:, :-nfeature], (-1, n_in, nfeature))
+            if vinfo is None:                    
+                y = dataset[0][:, -nfeature:]
+            else:
+                y = dataset[0][:, vmapping]
 
-            logging.debug("shape, X: {}, y: {}".format(X.shape, y.shape))
+            logging.info("main-170: shape, X: {}, y: {}".format(X.shape, y.shape))
             
     if mode == "train":
-        history = train(X, y, epochs, batchsize, mconf, loss=loss, name=mname)
+#         history = train(X, y, epochs, batchsize, mconf, loss=loss, name=mname, lossw=lossw, earlystopper=earlystopper)        
+        history = train(X, y, epochs, batchsize, mconf, name=mname)
         return [history, X, y]
     elif mode == "test":
 #         scaler = preprocessing.MinMaxScaler()
-        scaler = dataset[-1]
-        # saved_model = "/home/yuzhe/DataScience/QC/model/lstm1_0154_0.009_0.008_202008071814.hdf5"
-#         saved_model = "/home/yuzhe/DataScience/QC/model/lstm1_tune1_0036_0.009_0.011_202008111209.hdf5"
+        if vinfo is None:
+            scaler = dataset[-1]
+        else:
+            if rescale == "MinMax":
+                scaler = preprocessing.MinMaxScaler()
+                scaler.fit(vinfo.values)
+            else:
+                scaler = preprocessing.StandardScaler()
+                scaler.fit(y)
 
-#         mname = "LSTM1_DB_MAE_tune1"
-#         outd = "/NAS-129/users1/T1/DATA/RNN/QC/{}".format(mname)
-
-        assert evald is not None
-        evald_ = "{}/{}".format(evald, mname)
-        test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects)
+#         assert evald is not None
+        evald_ = evald
+        if evald is not None:
+            evald_ = "{}/{}".format(evald, mname)
+        y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects)
+        return y_out
     elif mode == "finetune":
 #         saved_model = "/home/yuzhe/DataScience/QC/model/lstm1_0154_0.009_0.008_202008071814.hdf5"
         assert saved_model is not None
@@ -770,34 +845,42 @@ def main(mode, tperiod, gif,
 
 # # Model
 
-# In[ ]:
+# In[34]:
 
 
 if __name__ == "__main__":
     
+#### gpu setting
     import tensorflow as tf
-
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     # import tensorflow as tf
     gpus = tf.config.experimental.list_physical_devices('GPU')
-    nMB  = 1024 * 8
+
+    nMB  = 1024 * 8  # for tf.config.experimental.VirtualDeviceConfiguration
     
     if gpus:
         try:
-            tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=nMB)])
+            tf.config.experimental.set_memory_growth(gpus[0], enable=True)
+#             tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=nMB)])
         except RuntimeError as e:
             print(e)
-    
-    tf.random.uniform([1000, 3])
-        
-    logging.getLogger().setLevel(logging.DEBUG)
-    
-    ind = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
-    logd = "/home/yuzhe/DataScience/QC/log"
-    npyd = "/home/yuzhe/DataScience/dataset"
 
+###### training for historical qc ######
+            
+#### config
+    logging.getLogger().setLevel(logging.INFO)
+#     logging.getLogger().setLevel(logging.DEBUG)
+       
+    ind    = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
+    logd   = "/home/yuzhe/DataScience/QC/log"
+    npyd   = "/home/yuzhe/DataScience/dataset"
+    modeld = "./model"
+    evald  = "/NAS-129/users1/T1/DATA/RNN/QC"
+    gif    = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
+    
     if not os.path.exists(logd):
         os.makedirs(logd)
 
@@ -806,44 +889,106 @@ if __name__ == "__main__":
 
     tperiod_train = [2012010101, 2015123124]
     tperiod_test  = [2016010101, 2016123124]
-
-    # stninfo = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/RR_analysis_grid_stationlist.txt"
-    gif = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
-
-    epochs = 70000
-    batchsize = 5000
-#     dg_ = dgenerator(ind=ind, gif=stninfo, npyd=npyd)
-#     dg = dg_.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=True, batchsize=batchsize)
     
-#     train(dg, 7000, batchsize)
+    custom_objects = {"YZKError": YZKError, "WeightedBinaryCrossntropy": WeightedBinaryCrossntropy}
     
-#     hrdg = dgenerator(ind=ind, gif=gif, npyd=npyd)
-#     hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="trainStandard", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
-
-#     X_train = hrfs_train[0][:, :-4]
-#     X_train = np.reshape(X_train, (-1, 6, 4))  # reshape to [samplesize, timesteps, features]
-#     y_train = hrfs_train[0][:, -4:]
-
-#     print(hrfs_train[0].shape, X_train.shape, y_train.shape)
-#     train(X_train, y_train, 7000, batchsize)
+    epochs = 500
+    batchsize = 100
 
     # train 
 #     loss = YZKError(element_weight=[1 / 6., 1 / 6., 1 / 6., 1 / 2.], penalized=-1)
 
     regloss = YZKError(penalized=-1)
     regloss = "mae"
-    regloss = YZKError()
-
-    clsloss = WeightedBinaryCrossntropy(element_weight=[7, 1])
-    loss = [regloss, clsloss]
-    lossw = [1, 1]
+#     regloss = YZKError()
+    
     mname = "LSTM1_DB_YZKPMAECos"
     mname = "DNNLSTM_DB_MAE_WBC15"    
-    mname = "DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p2"
+    mname = "DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p2_actfntanh"
     mconf = {"name": "DNNLSTM", "units": [10, 30, 10, 30], "dropouts": 0.25, "activations": "relu"}
-    mconf = {"name": "DNNLSTM", "units": [20, 20, 20, 60], "outactfn": [None, "sigmoid"], "outshape": [4, 1], "dropouts": 0.2, "activations": "relu"}
+    mconf = {"name": "DNNLSTM", "units": [20, 20, 20, 60], "outactfn": ["tanh", "sigmoid"], "outshape": [4, 1], "dropouts": 0.2, "activations": "relu"}
 
-    ret = main(mode="train", tperiod=tperiod_train, gif=gif, mconf=mconf, npysuffix="trainStandard", db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, npyd=npyd, mname=mname, loss=loss, lossw=lossw)
+#### stackedLSTM for Temp
+    regloss = "mae"
+    loss = [regloss]
+    mconf = {"name": "stackedLSTM", "units": [32, 64], "outactfn": ["sigmoid"], "outshape": [1], "loss": loss}
+    mname = "stackedLSTM_MAE_MinMaxScaler_HourlyTemp"
+   
+    vinfo = {"Temp": [-20.0, 50.0],
+              "RH": [0.0, 100.0],
+              "Pres": [600.0, 1100.0]}
+    
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
+#                db=False, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#                npysuffix="trainMinMax", mname=mname, vinfo=vinfo)
+    
+#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+
+#     main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
+#          db=False, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#          npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+
+    
+#### stackedLSTM for Precp
+# 2012010101 - 2015123124
+# INFO:root:main-141, class (scaled): 0, nclass: 6865225
+# INFO:root:main-141, class (scaled): 1, nclass: 471860
+# INFO:root:main-141, class (scaled): 2, nclass: 45640
+# INFO:root:main-141, class (scaled): 3, nclass: 25844
+# INFO:root:main-141, class (scaled): 4, nclass: 13799
+
+    regloss = "mae"
+#     clsloss = WeightedBinaryCrossntropy(element_weight=[1, 1])
+    clsloss = "categorical_crossentropy"
+#     clsloss = "sparse_categorical_crossentropy"
+#     loss = [regloss, clsloss]
+    loss = clsloss
+    lossw = [1, 3]
+    metric = [tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+    task = "classification"
+    dropout = 0.2
+    recurrent_dropout = 0.2
+    
+#     mconf = {"name": "stackedLSTM", "units": [64, 64], "outactfn": ["sigmoid", "softmax"], "outshape": [1, 5], "loss": loss}
+    mconf = {"name": "stackedLSTM", "units": [32, 64, 128, 64], "outactfn": ["softmax"], "outshape": [5], "loss": loss, "metric": metric, "earlystopper": True, "task": task, "dropout": dropout, "recurrent_dropout": recurrent_dropout}
+
+    mname = "stackedLSTM_MAEpCBC_MinMaxScaler_HourlyPrecp"
+
+    vinfo = {"Precp": [0.0, 220.0]}
+    classify = [[3], [[0.1, 5, 10, 20]]]
+#     classify = [[3], [[0.1]]]
+
+    
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
+#                db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#                npysuffix="trainMinMax", mname=mname, vinfo=vinfo, classify=classify)
+    
+#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+
+#     main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
+#          db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#          npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+    
+#### CNN1D for Precp
+    mconf = {"name": "CNN1D", "units": [32, 16], "outactfn": ["sigmoid", "sigmoid"], "outshape": [1, 1], "activations": "relu"}
+    mname = "CNN1D_MAE_MinMaxScaler"
+    regloss = "mae"
+    clsloss = WeightedBinaryCrossntropy(element_weight=[5, 1])
+    loss = [regloss, clsloss]
+    lossw = [50, 1]
+    vinfo = {"Precp": [0., 220.]}
+    
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, mconf=mconf, npysuffix="trainStandard", db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, npyd=npyd, mname=mname, loss=loss, lossw=lossw)
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, mconf=mconf, npyd=npyd,
+#                db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#                npysuffix="trainMinMax", mname=mname, loss=loss, lossw=lossw, vinfo=vinfo)
+
+#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+
+#     main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
+#          db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#          npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+
     
 #     val_loss = 999
 #     tolerance= 0.001
@@ -858,92 +1003,119 @@ if __name__ == "__main__":
 #         val_loss = history.history["val_loss"][-1]
 
 
-    # test
-    saved_model = "./model/LSTM1_DB_MAE_2_0055_0.008_0.011_202008111819_2.hdf5"
-    mname = "LSTM1_DB_MAE_2"
 
-    saved_model = "./model/LSTM1_DB_YZKLoss_0057_-0.997_-0.991_202008171149.hdf5"
-    mname = "LSTM1_DB_YZKLoss"
-    
-    
-    saved_model = "./model/LSTM1_DB_YZKPMAECos_0071_-0.988_-0.980_202008191453.hdf5"
-    mname = "LSTM1_DB_YZKPMAECos"
-    
-    
-    saved_model = "DNNLSTM_DB_YZKPMAECos_0022_-0.977_-0.975_202008201418.hdf5"
-    mname = "DNNLSTM_DB_YZKPMAECos"
-    
-    saved_model = "./model/DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p5.hdf5"
-    mname = "DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p5"
+###### training for realtime qc ######
+    logging.getLogger().setLevel(logging.INFO)
+#     logging.getLogger().setLevel(logging.DEBUG)
 
+
+    ind    = "/NAS-DS1515P/users1/realtimeQC/ftpdata"
+    npyd   = "/home/yuzhe/DataScience/dataset"
+    modeld = "./model/ready"
+    evald  = "/NAS-129/users1/T1/DATA/RNN/QC"
+    gif    = "/NAS-DS1515P/users1/T1/res/stations.txt"
+    
+    tperiod_train = [201801010100, 202007312350]
+#     tperiod_test  = [202008010100, 202008312350]
+    tperiod_test  = [202007080550, 202007080550]
+
+
+    epochs = 500
+    batchsize = 1000
+    
+#### stackedLSTM for Temp
+    regloss = "mae"
+    loss = [regloss]
+    dropout = 0.2
+    recurrent_dropout = 0.2
+    recurrent_dropout = 0
+
+    
+    mconf = {"name": "stackedLSTM", 
+             "units": [32, 64, 128, 64], 
+             "outactfn": ["sigmoid"], 
+             "outshape": [1], 
+             "loss": loss, 
+             "metric": ["mae"], 
+             "earlystopper": True, 
+             "dropout": dropout, 
+             "recurrent_dropout": recurrent_dropout}
+    
+    mname = "stackedLSTM_MAE_MinMaxScaler_Temp10min"
    
-    saved_model = "./model/DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p2.hdf5"
-    mname = "DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p2"
-
-    evald = "/NAS-129/users1/T1/DATA/RNN/QC"
-
-
-    custom_objects = {"YZKError": YZKError, "WeightedBinaryCrossntropy": WeightedBinaryCrossntropy}
-#     model = load_model(saved_model)
-#     model = load_model(saved_model, custom_objects=custom_objects)
-#     y_pred = model.predict(np.random.random_sample((10, 6, 4)))
-#     print(y_pred)
-#     fnpy = None
-
-#     main(mode="test", ind=ind, tperiod=tperiod_test, gif=gif, npysuffix="testMinMax", db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
-    main(mode="test", tperiod=tperiod_test, gif=gif, npysuffix="testStandard", db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
-         npyd=npyd, saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects)
-
+    vinfo = {"Temp": [-20.0, 50.0]}
     
-#     scaled = np.reshape(hrfs_train[0], (-1, 7, 4))
-#     nsize = scaled.shape[0]
-#     logging.debug("shape of scaled: {}".format(scaled.shape))
-#     y_class = np.zeros(nsize)
-
-#     precp_ = scaled[:, :, 3]
-#     # np.any(scaled[:, :, 3] != 0, axis=0)
-
-#     nminority = precp_[np.any(precp_ != 0, axis=1)].shape[0]
-#     nmajority = nsize - nminority
-#     y_class[np.any(precp_ != 0, axis=1)] = 1
-#     logging.debug("rain : others = {} : {} = {} : {}".format(nminority, nmajority, nminority / nminority, nmajority / nminority))
-
-#     clscounter = Counter(y_class)
-#     for key_ in clscounter.keys(): 
-#         logging.debug("class: {}, nclass: {}\n".format(key_, clscounter[key_]))
-
-
-#     rus = RandomUnderSampler(random_state=0)
-#     X_resampled, y_resampled = rus.fit_resample(hrfs_train[0], y_class)
-
-#     clscounter = Counter(y_resampled)
-#     for key_ in clscounter.keys(): 
-#         logging.debug("class: {}, nclass: {}\n".format(key_, clscounter[key_]))
-
-#     X_train = np.reshape(X_resampled[:, :-4], (-1, 6, 4))
-#     y_train = X_resampled[:, -4:]
-
-#     logging.debug("shape, X: {}, y: {}".format(X_train.shape, y_train.shape))
+    ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
+               db=False, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize, 
+               npysuffix="train", mname=mname, vinfo=vinfo)
     
-#     train(X_train, y_train, epochs, batchsize)
+#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+
+#     ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, 
+#                db=False, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize, 
+#                npysuffix=None, saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+
+#### stackedLSTM for Precp
+# 201801010100 - 202007312350
+# INFO:root:main-141, class (scaled): 0, nclass: 30748053
+# INFO:root:main-141, class (scaled): 1, nclass: 2000755
+# INFO:root:main-141, class (scaled): 2, nclass: 205581
+# INFO:root:main-141, class (scaled): 3, nclass: 116764
+# INFO:root:main-141, class (scaled): 4, nclass: 56704
+
+ 
+    clsloss = "categorical_crossentropy"
+#     clsloss = "sparse_categorical_crossentropy"
+    loss = [clsloss]
+    lossw = [1, 3]
+    metric = [tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+    task = "classification"
+    dropout = 0.2
+    recurrent_dropout = 0.2
+    recurrent_dropout = 0
 
 
-# In[38]:
+    mconf = {"name": "stackedLSTM", 
+             "units": [32, 64, 128, 64], 
+             "outactfn": ["softmax"], 
+             "outshape": [5], 
+             "loss": loss, 
+             "metric": metric, 
+             "earlystopper": True, 
+             "task": task, 
+             "dropout": dropout, 
+             "recurrent_dropout": recurrent_dropout}
+
+    mname = "stackedLSTM_CBC_MinMaxScaler_Precp10min"
+
+    vinfo = {"Precp": [0.0, 220.0]}
+    
+    classify = [[3], [[0.1, 5, 10, 20]]]
+
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf,
+#                db=True, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize,
+#                npysuffix="train", mname=mname, vinfo=vinfo, classify=classify)
+
+    # 3. loss: 0.1250 - categorical_accuracy: 0.9641 - val_loss: 4.3427 - val_categorical_accuracy: 0.6591 (recurrent_dropout = 0)
+    # 2. loss: 0.1273 - categorical_accuracy: 0.9639 - val_loss: 4.3539 - val_categorical_accuracy: 0.6604
+    # 1. loss: 0.1269 - categorical_accuracy: 0.9639 - val_loss: 4.2968 - val_categorical_accuracy: 0.6605
+    saved_model = "{}/{}.hdf5".format(modeld, mname)
+
+    ret = main(mode="test", tperiod=tperiod_test, gif=gif, npyd=None, ind=ind,
+               db=True, n_in=6, n_out=1, dsrc="mdf", 
+               npysuffix="test", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
 
 
-a = np.reshape(hrfs_train[0], (-1, 7, 4))
-a[:, :, 3].min()
+# In[43]:
 
 
-# In[20]:
+ret[0][0, :, -4:]
 
 
-y_true = ret[1]
-
-print(y_true[1].shape)
+# In[45]:
 
 
-y_true[1][y_true[1] == 1].shape
+ret[-2][0, :, :]
 
 
 # # dgenerator

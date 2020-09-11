@@ -338,14 +338,14 @@ class cRunFunctionsInParallel():
 
         if any(self.exitcodes):
 #            print('INPARALLEL: Parallel processing batch set did not ALL succeed successfully ('+' '.join(self.names)+')')
-            print('INPARALLEL: Parallel processing batch set did not ALL succeed successfully.')
+            logging.info('INPARALLEL: Parallel processing batch set did not ALL succeed successfully.')
             # one of the functions you called failed.
             assert self.allowJobFailure
             print('          Tolerating job failure since allowJobFailure == True')
             return(False)
         else:
 #            print('INPARALLEL: Apparent success of all functions (' + ' '.join(self.names)+ ')')
-            print('INPARALLEL: Apparent success of all functions.')
+            logging.info('INPARALLEL: Apparent success of all functions.')
         return (self.exitcodes, [self.gotQueues[idx] for idx in range(len(self.jobs))])
 
     def updateStatus(self):
@@ -365,7 +365,8 @@ class cRunFunctionsInParallel():
         if not self.monitor_progress:
             return('')
 
-        if showsuccessful is None: showsuccessful = self.showFinished
+        if showsuccessful is None: 
+            showsuccessful = self.showFinished
 
         outs = ''
 
@@ -382,9 +383,8 @@ class cRunFunctionsInParallel():
 
         max_name_length = max([len(name) for name in self.names])
         max_funcname_length = max([len(name) for name in self.funcNames])
-        sep_row = '-'*(max_name_length + 48 + max_funcname_length) + '\n'
-        #table_fmt = '%' + str(max_name_length) + 's:\t%10s\t%10s\t%s()\n'
-        table_fmt = '%{0}s:\t%10s\t%10s\t%s()\n'.format(max_name_length)
+        sep_row = "-" * (max_name_length + 48 + max_funcname_length) + '\n'
+        table_fmt = "%{0}s:\t%10s\t%10s\t%s()\n".format(max_name_length)
         outs += sep_row + table_fmt % ('Job', 'Status', 'Queue', 'Func') + sep_row 
 
         # Check that we aren't going to show more *successfully finished* jobs than we're allowed: Find index of nth-last successful one. 
@@ -407,8 +407,8 @@ class cRunFunctionsInParallel():
         outs += sep_row
         # return([exitcode(job) for ii,job in enumerate(sjobs)])
         if outs != previousReportString:
-            print('\nReport status on {}'.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            print(outs + '\n')
+            logging.debug('\nReport status on {}'.format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            logging.debug(outs + '\n')
 
         return(outs)
 

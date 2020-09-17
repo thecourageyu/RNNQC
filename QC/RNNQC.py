@@ -1,7 +1,12 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[20]:
+
+
+
+
+# In[32]:
 
 
 from collections import deque, Counter
@@ -39,6 +44,7 @@ from lib.mdfloader import Dataset
 from lib.parallel import runFunctionsInParallel
 from lib.textloader import textloader
 from lib.perfeval import perfeval as pf
+from lib.perfeval import getClasses
 
 floader   = Dataset.floader
 getGI     = Dataset.getGI
@@ -54,7 +60,7 @@ qcfparser = Dataset.qcfparser
 
 # # Functions
 
-# In[ ]:
+# In[3]:
 
 
 df = pd.DataFrame({'Col1': [10, 20, 15, 30, 45],
@@ -143,7 +149,7 @@ print(pda)
 
 # # Train
 
-# In[2]:
+# In[6]:
 
 
 def ratio_multiplier(y):
@@ -151,7 +157,7 @@ def ratio_multiplier(y):
         multiplier: resampling ratio of sample for some classes
     '''
     
-    multiplier={0: 0.075, 1: 0.95}
+    multiplier={0: 0.1, 1: 1.0}
     
     target_stats = Counter(y)
     for key, value in target_stats.items():
@@ -160,7 +166,7 @@ def ratio_multiplier(y):
     return target_stats
 
 
-# In[3]:
+# In[24]:
 
 
 # def train(X_train, y_train, epochs, batch_size, mconf, loss="mae", modeld="model", ckptd="ckpt", name="NN", earlystopper=True, lossw=None):
@@ -237,7 +243,7 @@ def train(X_train, y_train, epochs, batch_size, mconf, modeld="model", ckptd="ck
 
 # # Fine Tune
 
-# In[4]:
+# In[25]:
 
 
 def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", ckptd="ckpt"):
@@ -271,7 +277,7 @@ def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", 
     return history
 
 
-# In[5]:
+# In[26]:
 
 
 # hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
@@ -279,7 +285,7 @@ def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", 
 
 # # Test
 
-# In[5]:
+# In[27]:
 
 
 def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
@@ -289,12 +295,20 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
         tscale = "H"  #  D, H or M
     '''
 
+    datetimes_ = np.copy(datetime)
+    
     tformat = "%Y%m%d"
 
     if tscale == "H":
         sdtime = datetime.strptime(str(math.floor(datetimes[0] / 100.)), tformat)
         edtime = datetime.strptime(str(math.floor(datetimes[-1] / 100.)), tformat)
     elif tscale == "M":
+        if np.array([isinstance(datetimes[i], datetime) for i in range(2)]).all():
+            datetimes = [int(i.strftime("%Y%m%d%H%M")) for i in datetimes]
+#             print("dtimes2mnseidx-18: \n", datetimes)
+        else:
+            logging.Error("dtimes2mnseidx-16: np.array([isinstance(datetimes[i], datetime) for i in range(2)]).all() == False.")
+            sys.exit(-1)
         sdtime = datetime.strptime(str(math.floor(datetimes[0] / 10000.)), tformat)
         edtime = datetime.strptime(str(math.floor(datetimes[-1] / 10000.)), tformat)
 
@@ -311,10 +325,9 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
     sdttuple = sdtime.timetuple()
     s_YYYY = sdttuple[0]
     s_mm = sdttuple[1]
-    edttuple = sdtime.timetuple()
-    e_YYYY = sdttuple[0]
-    e_mm = sdttuple[1]
-
+    edttuple = edtime.timetuple()
+    e_YYYY = edttuple[0]
+    e_mm = edttuple[1]
 
     n_year = e_YYYY - s_YYYY + 1
 
@@ -327,7 +340,6 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
     else:
         HHs = [i for i in range(24)]
     MMs = [i * 10 for i in range(6)]  # MM
-
 
     for yidx in range(n_year):
         YYYY = s_YYYY + yidx
@@ -343,8 +355,10 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
             # dd
             dds = [i + 1 for i in range(mdays_)]
 
-
-
+            if (YYYY * 100 + mm < s_YYYY * 100 + s_mm) or (e_YYYY * 100 + e_mm < YYYY * 100 + mm):
+                seidx[yidx, mm - 1, :] = -999
+                continue
+            
             # for idx1
             for dd in dds:
                 if idx1 is None:
@@ -353,6 +367,11 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
                             if tscale == "M":
                                 for MM in MMs:
                                     YmdHM = YYYY * 10**8 + mm * 10**6 + dd * 10**4 + HH * 10**2 + MM
+                                    if YmdHM in df.index:
+                                        idx1 = df.loc[YmdHM]["idx"]
+                                        break
+                                if idx1 is not None:
+                                    break
                             else:
                                 YmdH = YYYY * 10**6 + mm * 10**4 + dd * 10**2 + HH
 
@@ -365,6 +384,7 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
             # for idx2
             dds.reverse()
             HHs.reverse()
+            MMs.reverse()
             for dd in dds:
                 if idx2 is None:
                     if tscale == "H" or tscale == "M":
@@ -372,6 +392,12 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
                             if tscale == "M":
                                 for MM in MMs:
                                     YmdHM = YYYY * 10**8 + mm * 10**6 + dd * 10**4 + HH * 10**2 + MM
+
+                                    if YmdHM in df.index:
+                                        idx2 = df.loc[YmdHM]["idx"]
+                                        break   
+                                if idx2 is not None:
+                                    break
                             else:
                                 YmdH = YYYY * 10**6 + mm * 10**4 + dd * 10**2 + HH
 
@@ -382,6 +408,7 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
                         Ymd = YYYY * 10**4 + mm * 10**2 + dd
             dds.reverse()
             HHs.reverse()
+            MMs.reverse()
 
             seidx[yidx, mm - 1, :] = -999
             if idx1 is not None:
@@ -406,44 +433,75 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
     return [seidx, seidx_]
 
 
-# In[6]:
+# In[28]:
 
 
-def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom_objects=None, classify=None):
+def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom_objects=None, classify=None, task=None, hsystem="01-24", tscale="H"):
     '''
-        X: [nsize, nstn, timestep, feature]
-        y: [nsize, nstn, feature]
-        vinfo: DataFrame
+        - X: [nsize, nstn, timestep, feature]
+        - y_: [nsize, nstn, ntarget], [[nsize, nstn, ntarget], [nsize, nstn, nclass]] or [nsize, nstn, nclass] 
+        - vinfo: DataFrame (for y_pred)
                  Temp      RH    Pres   Precp
             _________________________________
             0     -20       0     600       0
             1      50     100    1100     220
-        scaler: inverse transform values from output layer
+        - scaler: inverse transform values from output layer
+        - classify: be used to do "class to step" by perfeval
+        
+        -tasks
+            1. task="classification", then y_class=y_, get prediction y_class_pred, return y_clsout
+            2. task="class2step", then y=y_[0] and y_class=y_[1], get prediction y_class_pred, return y_clsout and get class2step in perfeval
+            3. task=None, then y=y_, get predictions y_pred, return y_valout
+            4. task=None and len(y_)=2, then y=y_[0] and y_class=y_[1], get predictions y_pred and y_class_pred, return [y_valout, y_clsout]
     '''
     
-    y = y_
-    if isinstance(y_, list) and len(y_) >= 2:
-        logging.debug("len(y_) = {} in test().".format(len(y_)))
+    logging.debug("test-15: shape of X = {}.".format(X.shape))
+    logging.debug("test-16: len(y_) = {}.".format(len(y_)))
+    
+    if task == "classification":  # shape of y_: [nsize, nstn, nclass] 
+        y_class = y_
+        nclass = y_class.shape[2]
+        logging.debug("test-22: shape of y = {}.".format(y_class.shape))
+    elif task == "class2step":  # shape of y_: [[nsize, nstn, ntarget], [nsize, nstn, nclass]]
         y = y_[0]
-    
-    logging.debug("shape of X = {} in test().".format(X.shape))
-    logging.debug("shape of y = {} in test().".format(y.shape))
+        y_class = y_[1]
+        nclass = y_class.shape[2]
+    else:
+        if isinstance(y_, list) and len(y_) >= 2:  # shape of y_: [[nsize, nstn, ntarget], [nsize, nstn, nclass]]
+            logging.debug("test-18: len(y_) = {}.".format(len(y_)))
+            y = y_[0]
+            y_class = y_[1]
+            nclass = y_class.shape[2]
+            logging.debug("test-29: shape of y = {}.".format(y_class.shape))
+        else:  # shape of y_: [nsize, nstn, ntarget] 
+            y = y_
+        logging.debug("test-30: shape of y = {}.".format(y.shape))
 
-    
     nsize = len(datetimes)
-    assert nsize == X.shape[0] == y.shape[0]
-    
     nstn = len(stnids)
-    assert nstn == X.shape[1] == y.shape[1]
+
+    if task == "classification" or task == "class2step":
+        assert nsize == X.shape[0] == y_class.shape[0]
+        assert nstn == X.shape[1] == y_class.shape[1]
+    else:
+        assert nsize == X.shape[0] == y.shape[0]
+        assert nstn == X.shape[1] == y.shape[1]
     
     timestep = X.shape[2]
     nfeature = X.shape[3]
     
-    y_out = np.ndarray((nsize, nstn, y.shape[2]))
-    
     vnames = vinfo.columns.tolist()
     vrange = vinfo.values
-
+    ntarget = len(vnames)
+    
+    if task == "classification" or task == "class2step":
+        assert ntarget == 1
+        y_clsout = np.ndarray((nsize, nstn, nclass), dtype=np.int)
+    else:
+        y_valout = np.ndarray((nsize, nstn, ntarget))
+        if isinstance(y_, list) and len(y_) >= 2:
+            y_clsout = np.ndarray((nsize, nstn, nclass), dtype=np.int)
+    
 #     if isinstance(scaler, preprocessing.MinMaxScaler):
 #         scaler.fit(vrange)
         
@@ -466,98 +524,175 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
 
     model.summary()
 
-#     merrors = {"ids": [], "errors": []}
     merrors = {"ids": []}
     for v_ in vnames:
         merrors[v_] = []
         
     for idx_, stnid_ in enumerate(stnids):
 
-        y_pred = model.predict(X[:, idx_, :, :])
-        if len(y_pred) == 2: 
-            y_pred = y_pred[0]
-#             if classify is not None:            
-#                 steps = 
-        
-        if classify is not None:
-            y_pred = scaler.inverse_transform(y_pred)
+        y_pred_ = model.predict(X[:, idx_, :, :])
+        logging.debug("main-87: {}, {}".format(y_pred_.shape, y_pred_))
+        if task == "classification":
+            y_class_pred = y_pred_
+            y_class_true = y_class[:, idx_, :]
+            y_clsout[:, idx_, :] = y_class_pred
+        elif task == "class2step":
+            y2step = y[:, idx_, :]
+            y_class_pred = y_pred_
+            y_class_true = y_class[:, idx_, :]
+            y_clsout[:, idx_, :] = y_class_pred
+        else:
+            if isinstance(y_, list) and len(y_) >= 2: 
+                assert len(y_pred) >= 2 
+                y_pred = y_pred_[0]
+                y_class_pred = y_pred_[1]
+                y_class_true = y_class[:, idx_, :]
+                y_clsout[:, idx_, :] = y_class_pred
+            else:
+                y_pred = y_pred_
             
-        y_true = y[:, idx_, :]
-        
-        y_out[:, idx_, :] = y_pred
+            y_pred = scaler.inverse_transform(y_pred)
+            y_true = y[:, idx_, :]
 
-        logging.info("test-76, shape of y_true = {} in test().".format(y_true.shape))
-        logging.info("test-77, shape of y_pred = {} in test().".format(y_pred.shape))
-        logging.info("test-78, shape of y_out  = {} in test().".format(y_out.shape))
+            logging.info("test-98, shape of y_pred = {}.".format(y_pred.shape))
+            logging.info("test-99, shape of y_true = {}.".format(y_true.shape))
+
+            y_valout[:, idx_, :] = y_pred
 
         if outd is not None:
 
-            ypdf = pd.DataFrame(y_pred, columns=["{}_pred".format(vname) for vname in vnames])
-            ytdf = pd.DataFrame(y_true, columns=["{}_true".format(vname) for vname in vnames])
-            outdf = pd.concat([ytdf, ypdf], axis=1)
-            outdf.index = datetimes
-            outdf.to_csv("{}/pred/{}.csv".format(outd, stnid_))
+            if "y_true" in locals() and "y_pred" in locals():
+                ypdf = pd.DataFrame(y_pred, columns=["{}_pred".format(vname) for vname in vnames])
+                ytdf = pd.DataFrame(y_true, columns=["{}_true".format(vname) for vname in vnames])
+                outdf = pd.concat([ytdf, ypdf], axis=1)
+                outdf.index = datetimes
+                outdf.to_csv("{}/pred/{}.csv".format(outd, stnid_))
 
-            outnp = outdf.values
-    #         errnp = np.apply_along_axis(lambda x: x[nfeature:] - x[0:nfeature], 1, outnp)
-            errnp = np.apply_along_axis(lambda x: x[len(vnames):] - x[0:len(vnames)], 1, outnp)
-            errv  = np.nanmean(errnp, axis=0)
-            merrors["ids"].append(stnid_)
-    #         merrors["errors"].append(errv)
+                outnp = outdf.values
+        #         errnp = np.apply_along_axis(lambda x: x[nfeature:] - x[0:nfeature], 1, outnp)
+                errnp = np.apply_along_axis(lambda x: x[len(vnames):] - x[0:len(vnames)], 1, outnp)
+                errv  = np.nanmean(errnp, axis=0)
+                merrors["ids"].append(stnid_)
+        #         merrors["errors"].append(errv)
 
-            for vidx, v_ in enumerate(vnames):
-                merrors[v_].append(errv[vidx])
+                for vidx, v_ in enumerate(vnames):
+                    merrors[v_].append(errv[vidx])
 
-            datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
+                datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
+                print("test-130: ", datetimes_.shape, y_true.shape, y_pred.shape)
+                
+                y_true = y_true[~np.isnan(y_pred).any(axis=1)]
+                datetimes_ = datetimes_[~np.isnan(y_pred).any(axis=1)]
+                y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
+                if "y_class_pred" in locals() and "y_class_true" in locals():
+                    y_class_pred = y_class_pred[~np.isnan(y_pred).any(axis=1)]
+                    y_class_true = y_class_true[~np.isnan(y_pred).any(axis=1)]
+                
+                y_pred = y_pred[~np.isnan(y_true).any(axis=1)]
+                datetimes_ = datetimes_[~np.isnan(y_true).any(axis=1)]
+                y_true = y_true[~np.isnan(y_true).any(axis=1)]
+                if "y_class_pred" in locals() and "y_class_true" in locals():
+                    y_class_pred = y_class_pred[~np.isnan(y_true).any(axis=1)]
+                    y_class_true = y_class_true[~np.isnan(y_true).any(axis=1)]
+                    
+                    # onehot to integer
+#                     y_class_pred = np.argmax(y_class_pred, axis=1)
+#                     y_class_true = np.argmax(y_class_true, axis=1)
+                
+#                 datetimes_ = datetimes_.ravel().tolist()
+            elif "y_class" in locals() and "y_class_pred" in locals():
+                datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
 
-            y_true = y_true[~np.isnan(y_pred).any(axis=1)]
-            datetimes_ = datetimes_[~np.isnan(y_pred).any(axis=1)]
-            y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
-
-            y_pred = y_pred[~np.isnan(y_true).any(axis=1)]
-            datetimes_ = datetimes_[~np.isnan(y_true).any(axis=1)]
-            y_true = y_true[~np.isnan(y_true).any(axis=1)]
-
-            datetimes_ = datetimes_.ravel().tolist()
+                y_class_true = y_class_true[~np.isnan(y_class_pred).any(axis=1)]
+                datetimes_ = datetimes_[~np.isnan(y_class_pred).any(axis=1)]
+                y_class_pred = y_class_pred[~np.isnan(y_class_pred).any(axis=1)]
+                if task == "class2step":
+                    y2step = y2step[~np.isnan(y_class_pred).any(axis=1)]
+                
+                y_class_pred = y_class_pred[~np.isnan(y_class_true).any(axis=1)]
+                datetimes_ = datetimes_[~np.isnan(y_class_true).any(axis=1)]
+                y_class_true = y_class_true[~np.isnan(y_class_true).any(axis=1)]
+                if task == "class2step":
+                    y2step = y2step[~np.isnan(y_class_true).any(axis=1)]
 
             if len(datetimes_) <= 0: 
                 logging.warning("sample size of {} = {}".format(stnid_, len(datetimes_)))
                 continue
 
-            seidx = dtimes2mnseidx(datetimes_)
+#             datetimes_ = datetimes_.ravel()
+            datetimes_ = datetimes_.ravel().tolist()
+            seidx = dtimes2mnseidx(datetimes_, hsystem=hsystem, tscale=tscale)
             seidx = seidx[1]
 
             for vidx, vname in enumerate(vnames):
                 for Ym in seidx.index.tolist():
                     idx1, idx2 = seidx.loc[Ym]
-                    if idx2 - idx1 <= 10:
+                    if idx2 - idx1 == 0:
                         logging.warning("idx1 = {}, idx2 = {} for {} on {}".format(idx1, idx2, stnid_, Ym))
                         continue
 
-                    title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])
+                    sdtime_ = datetimes_[idx1]
+                    edtime_ = datetimes_[idx2]
+                    
+                    if isinstance(sdtime_, datetime):
+                        if tscale == "M":
+                            sdtime_ = datetime.strftime(sdtime_, "%Y%m%d%H%M")
+                        else:
+                            sdtime_ = datetime.strftime(sdtime_, "%Y%m%d%H")
+
+                    if isinstance(edtime_, datetime):
+                        if tscale == "M":
+                            edtime_ = datetime.strftime(edtime_, "%Y%m%d%H%M")
+                        else:
+                            edtime_ = datetime.strftime(edtime_, "%Y%m%d%H")
+
+                    title = "{}_{}_{}_{}".format(vname, stnid_, sdtime_, edtime_)
+                        
+#                     title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])
                     xposi_ = np.arange(idx1, idx2 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
                     xlabel = [datetimes_[i] for i in xposi_]
                     xposi = np.arange(idx2 - idx1 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
 
                     if classify is not None:
                         kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel, "classify": classify}
-                    else:
+                        if "y_class_pred" in locals() and "y_class_true" in locals():
+                            kwarg.update({"y_class_true": y_class_true[idx1:(idx2 + 1), :], "y_class_pred": y_class_pred[idx1:(idx2 + 1), :]})
+                            
+                        if task == "classification" or task == "class2step":  # for classification 
+#                             kwarg.update({"task": "classification"})
+                            kwarg.update({"task": task})
+    
+                        if task == "class2step":
+                            kwarg.update({"y2step": y2step[idx1:(idx2 + 1), vidx]})
+                    else:  
                         kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel}
-                    pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+                    
+                    if task == "classification" or task == "class2step":
+#                         pf.tspredict(y_class_true[idx1:(idx2 + 1)], y_class_pred[idx1:(idx2 + 1)], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
 
-    if outd is not None:
+                        # onehot to integer
+                        y_class_pred_ = np.argmax(y_class_pred, axis=1)
+                        y_class_true_ = np.argmax(y_class_true, axis=1)
+                
+                        pf.tspredict(y_class_true_[idx1:(idx2 + 1)], y_class_pred_[idx1:(idx2 + 1)], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+                    else:
+                        pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+
+    if outd is not None and task != "classification":
         merrors["ids"].append("total")
-    #     merrors["errors"].append(sum(merrors["errors"]) / len(merrors["errors"]))
         for vidx, v_ in enumerate(vnames):
             merrors[v_].append(np.nanmean(np.array(merrors[v_])))
         merrors = pd.DataFrame(merrors)
         merrors.to_csv("{}/pred/{}.csv".format(outd, "error_check"), index=False)
 
-    return y_out
-
-
-# In[ ]:
-
+    if task == "classification": 
+        return y_clsout
+    elif task == "class2step": 
+        return y_clsout
+    elif isinstance(y_, list) and len(y_) >= 2:
+        return [y_valout, y_clsout]
+    else:
+        return y_valout
 
 
 # # LSTM with 60 cells and io with 4 features
@@ -568,14 +703,13 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
 # - parameters of cell states (with bias)  = 4 * 60 + 60 + 60 * 60
 # - parameters of output layer (with bias) = 60 * 4 + 4
 
-# In[46]:
+# In[29]:
 
 
-def main(mode, tperiod, gif,
-         db=True, n_in=6, n_out=1, dsrc="hrf", vinfo=None, 
-         mname="NN", mconf=None, epochs=100, batchsize=100,
-         ind=None, npyd=None, rescale=True, npysuffix=None, generator=False, 
-         saved_model=None, evald=None, custom_objects=None, classify=None, sampler="rus"):
+def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None, 
+         db=True, sampler="rus", 
+         dsrc="hrf", n_in=6, n_out=1, vrange=None, vinfo=None, classify=None, rescale="MinMax", generator=False, 
+         mconf=None, epochs=100, batchsize=100, saved_model=None, custom_objects=None, mname="NN"):
     
     '''
         1. mode:
@@ -598,26 +732,39 @@ def main(mode, tperiod, gif,
                 "dropouts": 0.25 or a list, 
                 "activations": "relu" or a list,
                 "earlystopper": True,                               (default is True) 
-                "task": "classification"}                           (optional)
+                "task": "classification" or "class2step"}           (optional)
+            where task: "class2step" for classification test or prediction
 
         4. rescale:
             - if rescale is not None == True == "Standard", then scaler is StandardScaler
             - if rescale is not None == "MinMax", then scaler is MinMaxScaler
-            
-        5. vinfo: what variables to evaluate loss for regression and set range for inverse transform from normalization
+
+        5. vrange: to specify features and their range (input: X)
+
+        6. vinfo: to specify what variables to evaluate losses and set their range for inverse transform from normalization (input: y_true, y_class)
         
-        6. classify: [[idx1, idx2, ...], [[values for classifing], [], ...]]
+        7. classify: [[idx1, idx2, ...], [[values for classifing], [], ...]]
             ex.
                 [[0, 3], [[-5, 0, 5, 10, 15], [0, 10, 20, 30, 40]]]
                 0 to Temp, 3 to Precp         
     '''
     
-    nfeature = 4
-    
-    dg = dgenerator(ind=ind, gif=gif, npyd=npyd)
-    
+    dg = dgenerator(ind=ind, gif=gif, npyd=npyd)  # creat a object
+       
+    if vrange is None:
+        if dsrc == "mdf":
+            vrange = {"Temp": [-20.0, 50.0],
+                      "RH": [0.0, 1.0],
+                      "Pres": [600.0, 1100.0],
+                      "Precp": [0.0, 220.0]}
+
+            dg.vrange = pd.DataFrame(vrange)
+    else:
+        dg.vrange = pd.DataFrame(vrange)
+        
 #     vinfo = pd.DataFrame(dg.vrange)
     _vinfo = dg.vrange
+
     if vinfo is None:
         vinfo = _vinfo
     else:
@@ -625,11 +772,11 @@ def main(mode, tperiod, gif,
     
     _vnames = _vinfo.columns.tolist()
     _vrange = _vinfo.values
-    
+    nfeature = len(_vnames)
+           
     vnames = vinfo.columns.tolist()
-
     vmapping = [_vnames.index(i) - len(_vnames) for i in vnames]
-    
+
     logging.info("main-57: vnames  : {}".format(vnames))
     logging.info("main-58: _vnames : {}".format(_vnames))
     logging.info("main-59: vmapping: {}".format(vmapping))
@@ -640,34 +787,29 @@ def main(mode, tperiod, gif,
     
     if npyd is not None:
         fnpy = True
-    else:
+    else:  # load data from ind
         fnpy = False
         
     if dsrc == "hrf":
+        tscale = "H"
+        hsystem = "01-24"
         if npysuffix is None:
             npysuffix = mode 
             
-        if mode == "test":
-            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, fnpy=fnpy, generator=False, classify=classify)
-        else:
-            # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
-            dataset = dg.hrfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, fnpy=fnpy, generator=False, classify=classify)
+        if mode == "test":  # dim(dataset[0]) = (nsize, nstn, (n_in + n_out) * nfeature)
+            dataset = dg.hrfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, classify=classify, generator=False)
+        else:  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
+            dataset = dg.hrfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, classify=classify, generator=False)
     elif dsrc == "mdf":
+        tscale = "M"
+        hsystem = "00-23"
         if npysuffix is None:
             npysuffix = mode 
             
-        vrange = {"Temp": [-20.0, 50.0],
-                  "RH": [0.0, 1.0],
-                  "Pres": [600.0, 1100.0],
-                  "Precp": [0.0, 220.0]}
-    
-        dg.vrange = pd.DataFrame(vrange)
-
         if mode == "test":
-            dataset = dg.mdfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, fnpy=fnpy, generator=False, classify=classify)
+            dataset = dg.mdfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, classify=classify, generator=False)
         else:
-            # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
-            dataset = dg.mdfgenerator(tperiod, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, fnpy=fnpy, generator=False, classify=classify)
+            dataset = dg.mdfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, classify=classify, generator=False)
     else:
         logging.error("main-100: data source must be hrf or mdf.")
         
@@ -686,11 +828,39 @@ def main(mode, tperiod, gif,
     
     if mode == "test":
         X = np.reshape(dataset[0][:, :, 0:-nfeature], (-1, nstn, n_in, nfeature))
-        y = dataset[-2]
-        logging.debug("main-101: shape of y = {} in main().".format(y.shape))
-        if vinfo is not None:
-            y = dataset[-2][:, :, vmapping]
-            logging.debug("shape of y = {} if vinfo is not None in main().".format(y.shape))
+        
+        if classify is not None:
+            nclass = len(classify[1][0]) + 1
+            assert dataset[0].shape[0] == dataset[1].shape[0]
+            y_class = dataset[1][:, :, classify[0][0]]  # only one variable classification, ex. 3 for precp, shape: [nsize, nstn]
+            y_onehot = np.ndarray((nsize, nstn, nclass), dtype=np.int)
+            y_onehot.fill(-999)
+            for i in range(nstn):
+                y_class_ = pd.DataFrame({"y_class": y_class[:, i]})
+                y_onehot_ = pd.get_dummies(y_class_["y_class"]).values
+                if y_onehot_.shape[1] != nclass:
+                    y_onehot_ = pd.get_dummies(y_class_["y_class"]).T.reindex(np.arange(nclass).tolist()).fillna(0).T.values
+                                                                  
+                y_onehot[:, i, :] = y_onehot_
+                    
+            if "task" in mconf.keys() and mconf["task"] == "classification":
+                y = y_onehot
+                logging.info("main-125: shape, X: {}, y: {}".format(X.shape, y.shape))
+            else:
+                if vinfo is None:
+#                     y = [X[:, -nfeature:], y_onehot]
+                    y = [dataset[-2], y_onehot]
+                else:
+#                     y = [X[:, vmapping], y_onehot]
+                    y = [dataset[-2][:, :, vmapping], y_onehot]
+
+                logging.info("main-132: shape, X: {}, y: {}, {}".format(X.shape, y[0].shape, y[1].shape))
+        else:
+            y = dataset[-2]
+            logging.debug("main-135: shape of y = {} in main().".format(y.shape))
+            if vinfo is not None:
+                y = dataset[-2][:, :, vmapping]
+                logging.debug("main-139: shape of y = {} if vinfo is not None.".format(y.shape))
     else:
         
         if "lossw" not in mconf.keys():
@@ -707,10 +877,9 @@ def main(mode, tperiod, gif,
         
         if classify is not None:
             assert dataset[0].shape[0] == dataset[1].shape[0]
+            nclass = len(classify[1][0]) + 1
             y_class = dataset[1][:, classify[0][0]]  # only one variable classification, ex. 3 for precp
-            
-            print("main-127: \n", y_class[0:10])
-            
+                        
             if db:
 
     #             scaled = np.reshape(dataset[0], (-1, n_in + n_out, nfeature))  # [nsize, n_in + n_out, nfeature]
@@ -759,8 +928,9 @@ def main(mode, tperiod, gif,
 
                 y_class = pd.DataFrame({"y_class": y_resampled})
                 y_onehot = pd.get_dummies(y_class["y_class"]).values
-
-                print("main-173: \n", y_onehot[0:10, :])
+                if y_onehot.shape[1] != nclass:
+                    y_onehot = pd.get_dummies(y_class["y_class"]).T.reindex(np.arange(nclass).tolist()).fillna(0).T.values
+            
 
                 clscounter = Counter(y_resampled)
                 for key_ in clscounter.keys(): 
@@ -833,7 +1003,14 @@ def main(mode, tperiod, gif,
         evald_ = evald
         if evald is not None:
             evald_ = "{}/{}".format(evald, mname)
-        y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects)
+            
+#         if "task" in mconf.keys() and mconf["task"] == "classification":
+        if mconf is not None:
+            if "task" in mconf.keys():
+                y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects, task=mconf["task"], hsystem=hsystem, tscale=tscale, classify=classify[1][0])
+        else:
+            y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects, hsystem=hsystem, tscale=tscale)
+
         return y_out
     elif mode == "finetune":
 #         saved_model = "/home/yuzhe/DataScience/QC/model/lstm1_0154_0.009_0.008_202008071814.hdf5"
@@ -845,11 +1022,11 @@ def main(mode, tperiod, gif,
 
 # # Model
 
-# In[34]:
+# In[ ]:
 
 
 if __name__ == "__main__":
-    
+#     sys.exit()
 #### gpu setting
     import tensorflow as tf
     
@@ -1004,10 +1181,10 @@ if __name__ == "__main__":
 
 
 
-###### training for realtime qc ######
+###### 2. training for realtime qc ######
+
     logging.getLogger().setLevel(logging.INFO)
 #     logging.getLogger().setLevel(logging.DEBUG)
-
 
     ind    = "/NAS-DS1515P/users1/realtimeQC/ftpdata"
     npyd   = "/home/yuzhe/DataScience/dataset"
@@ -1017,45 +1194,55 @@ if __name__ == "__main__":
     
     tperiod_train = [201801010100, 202007312350]
 #     tperiod_test  = [202008010100, 202008312350]
-    tperiod_test  = [202007080550, 202007080550]
+    tperiod_test  = [202008010000, 202009152350]
 
-
-    epochs = 500
+    epochs = 100
     batchsize = 1000
     
-#### stackedLSTM for Temp
+#### 2.1 stackedLSTM for Temp 10min, dropout will break the model
     regloss = "mae"
-    loss = [regloss]
-    dropout = 0.2
-    recurrent_dropout = 0.2
+#     regloss = YZKError()
+#     dropout = 0.2
+    dropout = 0
     recurrent_dropout = 0
 
+#     vrange = {"Temp": [-20.0, 50.0],
+#               "RH": [0.0, 1.0],
+#               "Pres": [600.0, 1100.0]}
     
+    vrange = {"Temp": [-20.0, 50.0]}
+    
+    vinfo = {"Temp": [-20.0, 50.0]}
+
+#     vinfo = {"Temp": [-20.0, 50.0],
+#               "RH": [0.0, 1.0],
+#               "Pres": [600.0, 1100.0]}
+    
+    # best units = [64]
     mconf = {"name": "stackedLSTM", 
-             "units": [32, 64, 128, 64], 
+             "units": [32, 64, 32], 
              "outactfn": ["sigmoid"], 
-             "outshape": [1], 
-             "loss": loss, 
+             "outshape": [len(vinfo)], 
+             "loss": [regloss], 
              "metric": ["mae"], 
              "earlystopper": True, 
              "dropout": dropout, 
              "recurrent_dropout": recurrent_dropout}
     
     mname = "stackedLSTM_MAE_MinMaxScaler_Temp10min"
-   
-    vinfo = {"Temp": [-20.0, 50.0]}
     
-    ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
-               db=False, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize, 
-               npysuffix="train", mname=mname, vinfo=vinfo)
+#    ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="temp", 
+#               db=False, 
+#               dsrc="mdf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale="MinMax",
+#               mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
     
-#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+    saved_model = "{}/{}.hdf5".format(modeld, mname)
 
-#     ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, 
-#                db=False, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize, 
-#                npysuffix=None, saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+    ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
+               dsrc="mdf", vrange=vrange, vinfo=vinfo, rescale="MinMax", 
+               saved_model=saved_model, custom_objects=custom_objects, mname=mname)
 
-#### stackedLSTM for Precp
+#### 2.2 stackedLSTM for Precp 10min
 # 201801010100 - 202007312350
 # INFO:root:main-141, class (scaled): 0, nclass: 30748053
 # INFO:root:main-141, class (scaled): 1, nclass: 2000755
@@ -1063,59 +1250,49 @@ if __name__ == "__main__":
 # INFO:root:main-141, class (scaled): 3, nclass: 116764
 # INFO:root:main-141, class (scaled): 4, nclass: 56704
 
- 
     clsloss = "categorical_crossentropy"
 #     clsloss = "sparse_categorical_crossentropy"
-    loss = [clsloss]
     lossw = [1, 3]
-    metric = [tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+    metric = tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)
     task = "classification"
-    dropout = 0.2
-    recurrent_dropout = 0.2
+#     dropout = 0.2
+#     recurrent_dropout = 0.2
+    dropout = 0
     recurrent_dropout = 0
 
+    classify = [[3], [[0.1, 5, 10, 20]]]
 
     mconf = {"name": "stackedLSTM", 
-             "units": [32, 64, 128, 64], 
+             "units": [32, 64, 32], 
              "outactfn": ["softmax"], 
-             "outshape": [5], 
-             "loss": loss, 
-             "metric": metric, 
-             "earlystopper": True, 
-             "task": task, 
+             "outshape": [len(classify[1][0]) + 1], 
+             "loss": [clsloss], 
+             "metric": [metric], 
+             "earlystopper": False, 
              "dropout": dropout, 
-             "recurrent_dropout": recurrent_dropout}
-
+             "recurrent_dropout": recurrent_dropout,
+             "task": task}
+       
     mname = "stackedLSTM_CBC_MinMaxScaler_Precp10min"
 
     vinfo = {"Precp": [0.0, 220.0]}
     
-    classify = [[3], [[0.1, 5, 10, 20]]]
-
-#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf,
-#                db=True, n_in=6, n_out=1, dsrc="mdf", epochs=epochs, batchsize=batchsize,
-#                npysuffix="train", mname=mname, vinfo=vinfo, classify=classify)
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="train", 
+#                db=True, 
+#                dsrc="mdf", n_in=6, n_out=1, vinfo=vinfo, rescale="MinMax", classify=classify,
+#                mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
 
     # 3. loss: 0.1250 - categorical_accuracy: 0.9641 - val_loss: 4.3427 - val_categorical_accuracy: 0.6591 (recurrent_dropout = 0)
     # 2. loss: 0.1273 - categorical_accuracy: 0.9639 - val_loss: 4.3539 - val_categorical_accuracy: 0.6604
     # 1. loss: 0.1269 - categorical_accuracy: 0.9639 - val_loss: 4.2968 - val_categorical_accuracy: 0.6605
     saved_model = "{}/{}.hdf5".format(modeld, mname)
 
-    ret = main(mode="test", tperiod=tperiod_test, gif=gif, npyd=None, ind=ind,
-               db=True, n_in=6, n_out=1, dsrc="mdf", 
-               npysuffix="test", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+    task = "class2step"
+    mconf = {"task": task}
 
-
-# In[43]:
-
-
-ret[0][0, :, -4:]
-
-
-# In[45]:
-
-
-ret[-2][0, :, :]
+#     ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
+#                dsrc="mdf", vinfo=vinfo, rescale="MinMax", classify=classify, 
+#                mconf=mconf, saved_model=saved_model, custom_objects=custom_objects, mname=mname)
 
 
 # # dgenerator
@@ -1146,85 +1323,6 @@ if __name__ == "__main__":
 
 #     datetimes = hrfs_test[1]
 #     stnids = hrfs_test[2]
-
-
-# In[ ]:
-
-
-hrfs_train[0][:, -1]
-
-
-# In[ ]:
-
-
-rainsimes = hrfs_train[1]
-nsize = len(datetimes)
-stnids = hrfs_train[2]
-nstn = len(stnids)
-print(nsize, nstn)
-hrdata = hrfs_train[-1]
-
-rains = np.zeros((nsize * nstn, 1), dtype=np.int)
-hrstacked = np.reshape(hrdata, (-1, 4))
-# precpd = pd.DataFrame(hrstacked[:, -1], columns=["precp"])
-
-precpd = hrstacked[:, -1]
-rains[np.where(precpd > 0)] = 1
-
-clscounter = Counter(rains.ravel())
-for key_ in clscounter.keys(): 
-    logging.debug("class (scaled): {}, nclass: {}\n".format(key_, clscounter[key_]))
-
-
-# In[ ]:
-
-
-norain_ = rains[rains == 0].shape[0]
-rain_ = rains[rains == 1].shape[0]
-assert norain_ + rain_ == nsize * nstn
-print("not rain: {}, rain: {}, total: {}".format(norain_, rain_, nsize * nstn))
-
-
-# In[ ]:
-
-
-norain_ / rain_
-
-
-# In[ ]:
-
-
-# precpd.describe()
-print("shape of precpd: {}".format(precpd.shape))
-precpd.dropna(inplace=True)
-print("shape of precpd (dropna): {}".format(precpd.shape))
-
-precpd.describe()
-precpd.hist(bins=30)
-
-
-# In[ ]:
-
-
-hrstacked
-
-
-# In[ ]:
-
-
-precpd = precpd.values
-
-
-# In[ ]:
-
-
-prepgt0 = pd.DataFrame(precpd[np.where(precpd > 0)])
-prepgt0.describe()
-
-fig, ax = plt.subplots(figsize=(16, 10))
-# ax.set_xlim([-1, 100])
-n, bins, patches = ax.hist(prepgt0.values, bins=10)
-print(n, bins)
 
 
 # ## LSTM inputs: A 3D tensor with shape [batch, timesteps, feature].

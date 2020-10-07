@@ -1,32 +1,33 @@
-#!/usr/bin/env python
+#!/opt/anaconda3/bin/python3
 # coding: utf-8
 
-# In[20]:
+##!/usr/bin/env python
+
+# In[ ]:
+
+# In[6]:
 
 
+import argparse
+import calendar
+import gc
+import logging
+import math
+import os
+import re
+import sys
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
-# In[32]:
-
+plt.style.use('ggplot')
 
 from collections import deque, Counter
 from datetime import datetime, timedelta
 from fbprophet import Prophet
 from imblearn.under_sampling import ClusterCentroids
 from imblearn.under_sampling import RandomUnderSampler, TomekLinks
-
-import argparse
-import calendar
-import logging
-import math
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import pandas as pd
-import re
-import sys
-
-plt.style.use('ggplot')
 
 from tensorflow.keras.models import load_model
 from sklearn import preprocessing
@@ -51,7 +52,7 @@ getGI     = Dataset.getGI
 qcfparser = Dataset.qcfparser
 
 
-# In[ ]:
+# In[7]:
 
 
 # jupyter nbconvert --ExecutePreprocessor.timeout=90000 --to notebook --execute RNNQC.ipynb
@@ -60,7 +61,7 @@ qcfparser = Dataset.qcfparser
 
 # # Functions
 
-# In[3]:
+# In[8]:
 
 
 df = pd.DataFrame({'Col1': [10, 20, 15, 30, 45],
@@ -84,13 +85,13 @@ print(pda)
 # # LSTM with multiple lag timesteps
 # # LSTM inputs: A 3D tensor with shape [batch, timestep, feature].
 
-# In[ ]:
+# In[9]:
 
 
 4 * ((64 * 128 + 128) + (128 * 128))
 
 
-# In[ ]:
+# In[10]:
 
 
 # target = "Precp"
@@ -149,7 +150,7 @@ print(pda)
 
 # # Train
 
-# In[6]:
+# In[11]:
 
 
 def ratio_multiplier(y):
@@ -166,7 +167,7 @@ def ratio_multiplier(y):
     return target_stats
 
 
-# In[24]:
+# In[12]:
 
 
 # def train(X_train, y_train, epochs, batch_size, mconf, loss="mae", modeld="model", ckptd="ckpt", name="NN", earlystopper=True, lossw=None):
@@ -243,7 +244,7 @@ def train(X_train, y_train, epochs, batch_size, mconf, modeld="model", ckptd="ck
 
 # # Fine Tune
 
-# In[25]:
+# In[13]:
 
 
 def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", ckptd="ckpt"):
@@ -277,7 +278,7 @@ def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", 
     return history
 
 
-# In[26]:
+# In[14]:
 
 
 # hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
@@ -285,7 +286,7 @@ def finetune(X_train, y_train, epochs, batch_size, saved_model, modeld="model", 
 
 # # Test
 
-# In[27]:
+# In[15]:
 
 
 def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
@@ -433,27 +434,40 @@ def dtimes2mnseidx(datetimes, hsystem="01-24", tscale="H"):
     return [seidx, seidx_]
 
 
-# In[28]:
+# In[42]:
 
 
-def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom_objects=None, classify=None, task=None, hsystem="01-24", tscale="H"):
+a = datetime.strptime("20190109", "%Y%m%d")
+type(a)
+
+b = np.array([a, a, a])
+type(b[0])
+
+isinstance(a, datetime)
+
+
+# In[16]:
+
+
+def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, ndel=0, outd=None, custom_objects=None, classify=None, task=None, hsystem="01-24", tscale="H"):
     '''
         - X: [nsize, nstn, timestep, feature]
         - y_: [nsize, nstn, ntarget], [[nsize, nstn, ntarget], [nsize, nstn, nclass]] or [nsize, nstn, nclass] 
-        - vinfo: DataFrame (for y_pred)
+        - vinfo: DataFrame (specify predict which variables for y_pred)
                  Temp      RH    Pres   Precp
             _________________________________
             0     -20       0     600       0
             1      50     100    1100     220
         - scaler: inverse transform values from output layer
+        - ndel: delete first n data
         - classify: be used to do "class to step" by perfeval
-        
-        -tasks
+        - tasks
             1. task="classification", then y_class=y_, get prediction y_class_pred, return y_clsout
             2. task="class2step", then y=y_[0] and y_class=y_[1], get prediction y_class_pred, return y_clsout and get class2step in perfeval
             3. task=None, then y=y_, get predictions y_pred, return y_valout
             4. task=None and len(y_)=2, then y=y_[0] and y_class=y_[1], get predictions y_pred and y_class_pred, return [y_valout, y_clsout]
     '''
+
     
     logging.debug("test-15: shape of X = {}.".format(X.shape))
     logging.debug("test-16: len(y_) = {}.".format(len(y_)))
@@ -461,21 +475,22 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
     if task == "classification":  # shape of y_: [nsize, nstn, nclass] 
         y_class = y_
         nclass = y_class.shape[2]
-        logging.debug("test-22: shape of y = {}.".format(y_class.shape))
+        logging.debug("test-22: shape of y_class = {} for classification.".format(y_class.shape))
     elif task == "class2step":  # shape of y_: [[nsize, nstn, ntarget], [nsize, nstn, nclass]]
         y = y_[0]
         y_class = y_[1]
         nclass = y_class.shape[2]
+        logging.debug("test-30: shape of y_class = {} for class2step.".format(y_class.shape))
     else:
         if isinstance(y_, list) and len(y_) >= 2:  # shape of y_: [[nsize, nstn, ntarget], [nsize, nstn, nclass]]
-            logging.debug("test-18: len(y_) = {}.".format(len(y_)))
+            logging.debug("test-34: len(y_) = {}.".format(len(y_)))
             y = y_[0]
             y_class = y_[1]
             nclass = y_class.shape[2]
-            logging.debug("test-29: shape of y = {}.".format(y_class.shape))
+            logging.debug("test-38: shape of y_class = {}.".format(y_class.shape))
         else:  # shape of y_: [nsize, nstn, ntarget] 
             y = y_
-        logging.debug("test-30: shape of y = {}.".format(y.shape))
+        logging.debug("test-40: shape of y = {}.".format(y.shape))
 
     nsize = len(datetimes)
     nstn = len(stnids)
@@ -530,8 +545,15 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
         
     for idx_, stnid_ in enumerate(stnids):
 
+        gc.collect()
+        
         y_pred_ = model.predict(X[:, idx_, :, :])
-        logging.debug("main-87: {}, {}".format(y_pred_.shape, y_pred_))
+        
+        if len(y_pred_) >= 2:
+            logging.debug("main-100: shape of y_pred[0].shape = {}, y_pred[1].shape = {}".format(y_pred_[0].shape, y_pred_[1].shape))
+        else:
+            logging.debug("main-102: shape of y_pred.shape = {}, y_pred = {}".format(y_pred_.shape, y_pred_))
+
         if task == "classification":
             y_class_pred = y_pred_
             y_class_true = y_class[:, idx_, :]
@@ -554,8 +576,8 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
             y_pred = scaler.inverse_transform(y_pred)
             y_true = y[:, idx_, :]
 
-            logging.info("test-98, shape of y_pred = {}.".format(y_pred.shape))
-            logging.info("test-99, shape of y_true = {}.".format(y_true.shape))
+            logging.info("test-125, shape of y_pred = {}.".format(y_pred.shape))
+            logging.info("test-126, shape of y_true = {}.".format(y_true.shape))
 
             y_valout[:, idx_, :] = y_pred
 
@@ -579,21 +601,24 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
                     merrors[v_].append(errv[vidx])
 
                 datetimes_ = np.reshape(np.array(datetimes), (-1, 1))
-                print("test-130: ", datetimes_.shape, y_true.shape, y_pred.shape)
+                logging.debug("test-150: shape of datetimes = {}, y_true = {}, y_pred = {}".format(datetimes_.shape, y_true.shape, y_pred.shape))
                 
+                # drop nan in y_pred 
                 y_true = y_true[~np.isnan(y_pred).any(axis=1)]
                 datetimes_ = datetimes_[~np.isnan(y_pred).any(axis=1)]
-                y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
                 if "y_class_pred" in locals() and "y_class_true" in locals():
                     y_class_pred = y_class_pred[~np.isnan(y_pred).any(axis=1)]
                     y_class_true = y_class_true[~np.isnan(y_pred).any(axis=1)]
+                y_pred = y_pred[~np.isnan(y_pred).any(axis=1)]
+
                 
+                # drop nan in y_true
                 y_pred = y_pred[~np.isnan(y_true).any(axis=1)]
                 datetimes_ = datetimes_[~np.isnan(y_true).any(axis=1)]
-                y_true = y_true[~np.isnan(y_true).any(axis=1)]
                 if "y_class_pred" in locals() and "y_class_true" in locals():
                     y_class_pred = y_class_pred[~np.isnan(y_true).any(axis=1)]
                     y_class_true = y_class_true[~np.isnan(y_true).any(axis=1)]
+                y_true = y_true[~np.isnan(y_true).any(axis=1)]
                     
                     # onehot to integer
 #                     y_class_pred = np.argmax(y_class_pred, axis=1)
@@ -605,16 +630,17 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
 
                 y_class_true = y_class_true[~np.isnan(y_class_pred).any(axis=1)]
                 datetimes_ = datetimes_[~np.isnan(y_class_pred).any(axis=1)]
-                y_class_pred = y_class_pred[~np.isnan(y_class_pred).any(axis=1)]
                 if task == "class2step":
                     y2step = y2step[~np.isnan(y_class_pred).any(axis=1)]
+                y_class_pred = y_class_pred[~np.isnan(y_class_pred).any(axis=1)]               
                 
                 y_class_pred = y_class_pred[~np.isnan(y_class_true).any(axis=1)]
                 datetimes_ = datetimes_[~np.isnan(y_class_true).any(axis=1)]
-                y_class_true = y_class_true[~np.isnan(y_class_true).any(axis=1)]
                 if task == "class2step":
                     y2step = y2step[~np.isnan(y_class_true).any(axis=1)]
+                y_class_true = y_class_true[~np.isnan(y_class_true).any(axis=1)]
 
+                    
             if len(datetimes_) <= 0: 
                 logging.warning("sample size of {} = {}".format(stnid_, len(datetimes_)))
                 continue
@@ -627,8 +653,8 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
             for vidx, vname in enumerate(vnames):
                 for Ym in seidx.index.tolist():
                     idx1, idx2 = seidx.loc[Ym]
-                    if idx2 - idx1 == 0:
-                        logging.warning("idx1 = {}, idx2 = {} for {} on {}".format(idx1, idx2, stnid_, Ym))
+                    if idx2 - idx1 <= max(ndel, 5):
+                        logging.debug("test-207: idx1 = {}, idx2 = {} for {} on {}".format(idx1, idx2, stnid_, Ym))
                         continue
 
                     sdtime_ = datetimes_[idx1]
@@ -646,9 +672,9 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
                         else:
                             edtime_ = datetime.strftime(edtime_, "%Y%m%d%H")
 
+#                     title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])                            
                     title = "{}_{}_{}_{}".format(vname, stnid_, sdtime_, edtime_)
                         
-#                     title = "{}_{}_{}_{}".format(vname, stnid_, datetimes_[idx1], datetimes_[idx2])
                     xposi_ = np.arange(idx1, idx2 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
                     xlabel = [datetimes_[i] for i in xposi_]
                     xposi = np.arange(idx2 - idx1 + 1)[0:-1:math.floor((idx2 - idx1 + 1) / 5)].tolist()
@@ -667,6 +693,9 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
                     else:  
                         kwarg = {"title": title, "xposi": xposi, "xlabel": xlabel}
                     
+                    if not os.path.exists("{}/perfeval/{}/{}".format(outd, vname, stnid_)):
+                        os.makedirs("{}/perfeval/{}/{}".format(outd, vname, stnid_))
+                    
                     if task == "classification" or task == "class2step":
 #                         pf.tspredict(y_class_true[idx1:(idx2 + 1)], y_class_pred[idx1:(idx2 + 1)], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
 
@@ -674,16 +703,75 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
                         y_class_pred_ = np.argmax(y_class_pred, axis=1)
                         y_class_true_ = np.argmax(y_class_true, axis=1)
                 
-                        pf.tspredict(y_class_true_[idx1:(idx2 + 1)], y_class_pred_[idx1:(idx2 + 1)], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+                        pf.tspredict(y_class_true_[idx1:(idx2 + 1)], y_class_pred_[idx1:(idx2 + 1)], outd="{}/perfeval/{}/{}".format(outd, vname, stnid_), **kwarg)
                     else:
-                        pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}".format(outd, vname), **kwarg)
+                        pf.tspredict(y_true[idx1:(idx2 + 1), vidx], y_pred[idx1:(idx2 + 1), vidx], outd="{}/perfeval/{}/{}".format(outd, vname, stnid_), **kwarg)
+                            
+    # return predictions
+    if outd is not None:
+        if task == "classification" or task == "class2step":
+            for tidx, dtime in enumerate(datetimes):
 
-    if outd is not None and task != "classification":
-        merrors["ids"].append("total")
-        for vidx, v_ in enumerate(vnames):
-            merrors[v_].append(np.nanmean(np.array(merrors[v_])))
-        merrors = pd.DataFrame(merrors)
-        merrors.to_csv("{}/pred/{}.csv".format(outd, "error_check"), index=False)
+                if tidx < ndel:
+                    continue
+                
+#                 if np.isnan(y_clsout[tidx, :, :]).all():
+#                     continue
+                
+                ytdf = pd.DataFrame(np.argmax(y_class[tidx, :, :], axis=1), columns=["{}".format(vname) for vname in vnames])
+                ypdf = pd.DataFrame(np.argmax(y_clsout[tidx, :, :], axis=1), columns=["{}Est".format(vname) for vname in vnames])
+                outdf = pd.concat([ytdf, ypdf], axis=1)
+                outdf.index = stnids
+                
+                if isinstance(dtime, datetime):
+                    if tscale == "H":
+                        dtime = datetime.strftime(dtime, "%Y%m%d%H")
+                    elif tscale == "M":
+                        dtime = datetime.strftime(dtime, "%Y%m%d%H%M")
+                    
+                outdf.to_csv("{}/pred/cls_{}.csv".format(outd, dtime))
+        else:            
+            for tidx, dtime in enumerate(datetimes):
+                
+                if tidx < ndel:
+                    continue
+                    
+#                 if np.isnan(y_valout[tidx, :, :]).all(): 
+#                     continue
+    
+                if isinstance(dtime, datetime):
+                    if tscale == "H":
+                        dtime = datetime.strftime(dtime, "%Y%m%d%H")
+                    elif tscale == "M":
+                        dtime = datetime.strftime(dtime, "%Y%m%d%H%M")
+    
+                print(dtime, type(dtime), y[tidx, :, :].shape, y_valout[tidx, :, :].shape)
+                ytdf = pd.DataFrame(y[tidx, :, :], columns=["{}".format(vname) for vname in vnames])
+                ypdf = pd.DataFrame(y_valout[tidx, :, :], columns=["{}Est".format(vname) for vname in vnames])
+                outdf = pd.concat([ytdf, ypdf], axis=1)
+                outdf.index = stnids
+                outdf.to_csv("{}/pred/val_{}.csv".format(outd, dtime))
+               
+                if isinstance(y_, list) and len(y_) >= 2:
+#                 for tidx, dtime in enumerate(datetimes):
+                    
+#                     if tidx < ndel:
+#                         continue
+                        
+#                     if np.isnan(y_clsout[tidx, :, :]).all():
+#                         continue
+
+                    ytdf = pd.DataFrame(np.argmax(y_class[tidx, :, :], axis=1), columns=["{}".format(vname) for vname in vnames])
+                    ypdf = pd.DataFrame(np.argmax(y_clsout[tidx, :, :], axis=1), columns=["{}Est".format(vname) for vname in vnames])
+                    outdf = pd.concat([ytdf, ypdf], axis=1)
+                    outdf.index = stnids
+                    outdf.to_csv("{}/pred/cls_{}.csv".format(outd, dtime))
+                
+            merrors["ids"].append("total")
+            for vidx, v_ in enumerate(vnames):
+                merrors[v_].append(np.nanmean(np.array(merrors[v_])))
+            merrors = pd.DataFrame(merrors)
+            merrors.to_csv("{}/pred/{}.csv".format(outd, "error_check"), index=False)
 
     if task == "classification": 
         return y_clsout
@@ -695,6 +783,14 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
         return y_valout
 
 
+# In[36]:
+
+
+a = np.zeros((10, 20, 3))
+a.fill(np.nan)
+np.isnan(a).any()
+
+
 # # LSTM with 60 cells and io with 4 features
 # - total parameters = 4 * ((4 * 60 + 60) + (60 * 60)) + (60 * 4 + 4)
 # - parameters of input gates (with bias)  = 4 * 60 + 60 + 60 * 60
@@ -703,7 +799,7 @@ def test(X, y_, saved_model, vinfo, scaler, datetimes, stnids, outd=None, custom
 # - parameters of cell states (with bias)  = 4 * 60 + 60 + 60 * 60
 # - parameters of output layer (with bias) = 60 * 4 + 4
 
-# In[29]:
+# In[20]:
 
 
 def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None, 
@@ -750,7 +846,6 @@ def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None,
     '''
     
     dg = dgenerator(ind=ind, gif=gif, npyd=npyd)  # creat a object
-       
     if vrange is None:
         if dsrc == "mdf":
             vrange = {"Temp": [-20.0, 50.0],
@@ -759,9 +854,15 @@ def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None,
                       "Precp": [0.0, 220.0]}
 
             dg.vrange = pd.DataFrame(vrange)
+        else:
+            vrange = {"Temp": [-20.0, 50.0],
+                      "RH": [0, 100],
+                      "Pres": [600.0, 1100.0],
+                      "Precp": [0.0, 220.0]}
+            dg.vrange = pd.DataFrame(vrange)
     else:
         dg.vrange = pd.DataFrame(vrange)
-        
+    
 #     vinfo = pd.DataFrame(dg.vrange)
     _vinfo = dg.vrange
 
@@ -800,6 +901,7 @@ def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None,
             dataset = dg.hrfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=False, classify=classify, generator=False)
         else:  # dim(dataset[0]) = (nsize * nstn, (n_in + n_out) * nfeature)
             dataset = dg.hrfgenerator(tperiod, fnpy=fnpy, n_in=n_in, n_out=n_out, mode=npysuffix, rescale=rescale, reformat=True, vstack=True, classify=classify, generator=False)
+        print('95-dataset[0].shape = {}', dataset[0].shape)
     elif dsrc == "mdf":
         tscale = "M"
         hsystem = "00-23"
@@ -1007,9 +1109,9 @@ def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None,
 #         if "task" in mconf.keys() and mconf["task"] == "classification":
         if mconf is not None:
             if "task" in mconf.keys():
-                y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects, task=mconf["task"], hsystem=hsystem, tscale=tscale, classify=classify[1][0])
+                y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, outd=evald_, ndel=n_in, custom_objects=custom_objects, task=mconf["task"], hsystem=hsystem, tscale=tscale, classify=classify[1][0])
         else:
-            y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, evald_, custom_objects=custom_objects, hsystem=hsystem, tscale=tscale)
+            y_out = test(X, y, saved_model, vinfo, scaler, datetimes, stnids, outd=evald_, ndel=n_in, custom_objects=custom_objects, hsystem=hsystem, tscale=tscale)
 
         return y_out
     elif mode == "finetune":
@@ -1022,11 +1124,386 @@ def main(mode, tperiod, gif, ind=None, npyd=None, npysuffix=None, evald=None,
 
 # # Model
 
+# In[32]:
+
+
+if __name__ == "__main__":
+
+    argp = argparse.ArgumentParser()
+    argp.add_argument("-m", "--mode", dest="mode", type=str, help="mode, train or test")
+    argp.add_argument("-t", "--tperiod", dest="tperiod", type=int, nargs=2, help="two integers, start datetime and end datetime")
+    argp.add_argument("--vname", dest="vname", type=str)
+    argp.add_argument("--mname", dest="mname", default="stackedLSTM", type=str)
+    argp.add_argument("--dsrc", dest="dsrc", type=str, help="data source, hrf or mdf")
+    argp.add_argument("--dbalance", dest="dbalance", action="store_true", help="data balance")
+    argp.add_argument("--dscaler", dest="dscaler", default="MinMax", type=str, help="data scaler")
+    
+    argp.add_argument("--epochs", dest="epochs", default=100, type=int)
+    argp.add_argument("--batchsize", dest="batchsize", default=1000, type=int)
+    argp.add_argument("--earlystop", dest="earlystop", action="store_true", help="activate earlystopper")
+
+    argp.add_argument("--gmem", dest="gmem", default=8, type=int)
+    argp.add_argument("--dhold", dest="dhold", action="store_true")
+    argp.add_argument("--loglv", dest="loglv", default="INFO", type=str)
+    
+    args = argp.parse_args()
+ 
+    print('where is it?')
+    print(args)
+    print(args.dhold)
+
+#    sys.exit()
+
+#### config
+    if args.loglv == "DEBUG":
+        logLevel = logging.DEBUG
+    elif args.loglv == "INFO":
+        logLevel = logging.INFO
+    else:
+        logLevel = logging.WARNING
+
+    logging.getLogger().setLevel(logLevel)
+    
+    epochs = args.epochs
+    batchsize = args.batchsize
+    custom_objects = {"YZKError": YZKError, "WeightedBinaryCrossntropy": WeightedBinaryCrossntropy}
+    
+    tperiod = args.tperiod
+    
+    if args.dsrc == "hrf":
+        ind    = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
+        logd   = "/home/yuzhe/DataScience/QC/log"
+        npyd   = "/home/yuzhe/DataScience/dataset"
+        modeld = "./model/ready"
+        evald  = "/NAS-129/users1/T1/DATA/RNN/QC"
+        gif    = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
+        
+        if not os.path.exists(logd):
+            os.makedirs(logd)
+      
+        if not os.path.exists(npyd):
+            os.makedirs(npyd)
+      
+#        tperiod_train = [1998010101, 2015123124]
+#        tperiod_test  = [2016010101, 2019123124]
+        
+        
+        # train 
+#         loss = YZKError(element_weight=[1 / 6., 1 / 6., 1 / 6., 1 / 2.], penalized=-1)
+      
+        regloss = YZKError(penalized=-1)
+        regloss = "mae"
+#         regloss = YZKError()
+        
+#        mname = "LSTM1_DB_YZKPMAECos"
+#        mname = "DNNLSTM_DB_MAE_WBC15"    
+#        mname = "DNNLSTM_DB_YZKMAECos_WBC7_1_drop0p2_actfntanh"
+#        mconf = {"name": "DNNLSTM", "units": [10, 30, 10, 30], "dropouts": 0.25, "activations": "relu"}
+#        mconf = {"name": "DNNLSTM", "units": [20, 20, 20, 60], "outactfn": ["tanh", "sigmoid"], "outshape": [4, 1], "dropouts": 0.2, "activations": "relu"}
+     
+    elif args.dsrc == "mdf":
+        ind    = "/NAS-DS1515P/users1/realtimeQC/ftpdata"
+        npyd   = "/home/yuzhe/DataScience/dataset"
+        modeld = "./model/ready"
+        evald  = "/NAS-129/users1/T1/DATA/RNN/QC"
+        gif    = "/NAS-DS1515P/users1/T1/res/stations.txt"
+        
+#        tperiod_train = [201801010100, 202007312350]
+#         tperiod_test  = [202008010100, 202008312350]
+#        tperiod_test  = [202008010000, 202009152350]
+        
+#### gpu setting
+    import tensorflow as tf
+    
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+
+    if gpus:
+        try:
+            if args.dhold:
+                nMB  = 1024 * args.gmem  # for tf.config.experimental.VirtualDeviceConfiguration
+                tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=nMB)])
+            else:
+                tf.config.experimental.set_memory_growth(gpus[0], enable=True)
+        except RuntimeError as e:
+            logging.warning(e)
+
+    ###### 1. training for historical qc ######
+    if args.dsrc == "hrf":
+       
+        ### 1.1 stackedLSTM for Temp
+        if args.vname == "Temp": 
+            
+            mname = "{}_MAE_MinMaxScaler_HourlyTemp".format(args.mname)
+            # vrange = {"Temp": [-20.0, 50.0],
+            #           "RH": [0.0, 1.0],
+            #           "Pres": [600.0, 1100.0]}
+            vrange = {"Temp": [-20.0, 50.0]}
+            vinfo = {"Temp": [-20.0, 50.0]}
+                
+            if args.mode == "train":
+                regloss = "mae"    
+                dropout = 0
+                recurrent_dropout = 0
+                
+                # best units = [64]
+                mconf = {"name": args.mname, 
+                         "units": [32, 64, 32], 
+                         "outactfn": ["sigmoid"], 
+                         "outshape": [len(vinfo)], 
+                         "loss": [regloss], 
+                         "metric": ["mae"], 
+                         "earlystopper": args.earlystop, 
+                         "dropout": dropout, 
+                         "recurrent_dropout": recurrent_dropout}
+            
+            
+                ret = main(mode="train", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="hourlyTemp", 
+                           db=args.dbalance, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler,
+                           mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+            
+            elif args.mode == "test":
+                saved_model = "{}/{}.hdf5".format(modeld, mname)
+              
+#                 main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
+#                      db=False, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+#                      npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+              
+                ret = main(mode="test", tperiod=tperiod, gif=gif, ind=ind, npyd=npyd, npysuffix="hourlyTemp", evald=evald, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler, 
+                           saved_model=saved_model, custom_objects=custom_objects, mname=mname)
+          
+        ### 1.2 stackedLSTM for Precp
+        elif args.vname == "Precp":  
+            # 2012010101 - 2015123124
+            # INFO:root:main-141, class (scaled): 0, nclass: 6865225
+            # INFO:root:main-141, class (scaled): 1, nclass: 471860
+            # INFO:root:main-141, class (scaled): 2, nclass: 45640
+            # INFO:root:main-141, class (scaled): 3, nclass: 25844
+            # INFO:root:main-141, class (scaled): 4, nclass: 13799
+         
+            mname = "{}_CCE_{}_HourlyPrecp".format(args.mname, args.dscaler)
+            vrange = {"Temp": [-20.0, 50.0],
+                      "RH": [0, 100],
+                      "Pres": [600.0, 1100.0],
+                      "Precp": [0.0, 220.0]}
+            vinfo = {"Precp": [0.0, 220.0]}
+#             classify = [[3], [[0.1, 5, 10, 20]]]
+            classify = [[3], [[0.1]]]
+
+            if args.mode == "train":
+                
+                regloss = "mae"
+#                 clsloss = WeightedBinaryCrossntropy(element_weight=[1, 1])
+                clsloss = "categorical_crossentropy"
+#                 clsloss = "sparse_categorical_crossentropy"
+#                 loss = [regloss, clsloss]
+                lossw = [1, 3]
+                metric = [tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+                dropout = 0.
+                recurrent_dropout = 0.
+                
+                task = "classification"
+                
+#                 mconf = {"name": "stackedLSTM", "units": [64, 64], "outactfn": ["sigmoid", "softmax"], "outshape": [1, 5], "loss": loss}
+                mconf = {"name": args.mname, 
+                         "units": [32, 64, 128, 64], 
+                         "outactfn": ["softmax"], 
+                         "outshape": [len(classify[1][0]) + 1], 
+                         "loss": [clsloss], 
+                         "metric": metric, 
+                         "earlystopper": args.earlystop, 
+                         "task": task, 
+                         "dropout": dropout, 
+                         "recurrent_dropout": recurrent_dropout}
+          
+                #ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
+                #           db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
+                #           npysuffix="trainMinMax", mname=mname, vinfo=vinfo, classify=classify)
+            
+                ret = main(mode="train", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="hourly", 
+                           db=args.dbalance, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler, classify=classify,
+                           mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+            elif args.mode == "test":
+                saved_model = "{}/{}.hdf5".format(modeld, mname)
+                task = "class2step"
+                mconf = {"task": task}
+              
+#                ret = main(mode="test", tperiod=tperiod, gif=gif, npyd=npyd, 
+#                           db=True, 
+#                           dsrc="hrf", n_in=6, n_out=1, 
+#                           npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
+                ret = main(mode="test", tperiod=tperiod, gif=gif, ind=ind, npyd=npyd, npysuffix="hourly", evald=evald, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler, 
+                           saved_model=saved_model, mconf=mconf, custom_objects=custom_objects, mname=mname)
+            
+        ### 1.3 CNN1D for Precp
+        else:    
+
+            mname = "{}_MAEpCCE_{}".format(args.mname, args.dscaler)
+            vrange = {"Temp": [-20.0, 50.0],
+                      "RH": [0, 100],
+                      "Pres": [600.0, 1100.0],
+                      "Precp": [0.0, 220.0]}
+            vinfo = {"Precp": [0., 220.]}
+            classify = [[3], [[0.1, 5, 10, 20]]]
+
+            if args.mode == "train":
+                regloss = "mae"
+                clsloss = "categorical_crossentropy"
+                #clsloss = WeightedBinaryCrossntropy(element_weight=[5, 1])
+                loss = [regloss, clsloss]
+                lossw = [50, 1]
+                metric = ["mae", tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
+                dropout = 0.
+                recurrent_dropout = 0.
+           
+                mconf = {"name": args.mname, 
+                         "units": [32, 16], 
+                         "outactfn": ["sigmoid", "softmax"], 
+                         "outshape": [len(vinfo), len(classify[1][0]) + 1], 
+                         "activations": "relu",
+                         "loss": loss,
+                         "lossw": lossw,
+                         "metric": metric, 
+                         "earlystopper": args.earlystop, 
+                #         "task": task, 
+                         "dropout": dropout, 
+                         "recurrent_dropout": recurrent_dropout}
+          
+                logging.info("mconf: {}".format(mconf))
+                ret = main(mode="train", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="hourly", 
+                           db=args.dbalance, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler, classify=classify,
+                           mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+            elif args.mode == "test":
+                saved_model = "{}/{}.hdf5".format(modeld, mname)
+            
+                ret = main(mode="test", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="hourly", evald=evald, 
+                           dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler, classify=classify,
+                           saved_model=saved_model, custom_objects=custom_objects, mname=mname)
+          
+    ###### 2. training for realtime qc ######
+    elif args.dsrc == "mdf":
+
+        ### 2.1 stackedLSTM for Temp 10min, dropout will break the model
+        if args.vname == "Temp":
+#            mname = "{}_MAE_MinMaxScaler_Temp10min".format(args.mname)
+            mname = "{}_MAE_{}_Temp10min".format(args.mname, args.dscaler)
+#             vrange = {"Temp": [-20.0, 50.0],
+#                       "RH": [0.0, 1.0],
+#                       "Pres": [600.0, 1100.0]}
+#             vinfo = {"Temp": [-20.0, 50.0],
+#                       "RH": [0.0, 1.0],
+#                       "Pres": [600.0, 1100.0]}
+            vrange = {"Temp": [-20.0, 50.0]}
+            vinfo = {"Temp": [-20.0, 50.0]}
+                
+            if args.mode == "train":
+                regloss = "mae"
+#                 regloss = YZKError()
+#                 dropout = 0.2
+                dropout = 0
+                recurrent_dropout = 0
+              
+                # best units = [64]
+                mconf = {"name": args.mname, 
+                         "units": [32, 64, 32], 
+                         "outactfn": ["sigmoid"], 
+                         "outshape": [len(vinfo)], 
+                         "loss": [regloss], 
+                         "metric": ["mae"], 
+                         "earlystopper": args.earlystop, 
+                         "dropout": dropout, 
+                         "recurrent_dropout": recurrent_dropout}
+            
+                ret = main(mode="train", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="temp", 
+                           db=args.dbalance, 
+                           dsrc="mdf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale=args.dscaler,
+                           mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+            elif args.mode == "test": 
+                saved_model = "{}/{}.hdf5".format(modeld, mname)
+                 
+                ret = main(mode="test", tperiod=tperiod, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
+                           dsrc="mdf", vrange=vrange, vinfo=vinfo, rescale=args.dscaler, 
+                           saved_model=saved_model, custom_objects=custom_objects, mname=mname)
+      
+        ### 2.2 stackedLSTM for Precp 10min
+        elif args.vname == "Precp":
+        
+            mname = "{}_CCE_{}_Precp10min".format(args.mname, args.dscaler)
+            vrange = {"Temp": [-20.0, 50.0],
+                      "RH": [0.0, 1.0],
+                      "Pres": [600.0, 1100.0], 
+                      "Precp": [0.0, 220.0]}
+            vinfo = {"Precp": [0.0, 220.0]}
+            classify = [[3], [[0.1, 5, 10, 20]]]
+
+
+            if args.mode == "train":
+                # 201801010100 - 202007312350
+                # INFO:root:main-141, class (scaled): 0, nclass: 30748053
+                # INFO:root:main-141, class (scaled): 1, nclass: 2000755
+                # INFO:root:main-141, class (scaled): 2, nclass: 205581
+                # INFO:root:main-141, class (scaled): 3, nclass: 116764
+                # INFO:root:main-141, class (scaled): 4, nclass: 56704
+               
+                clsloss = "categorical_crossentropy"
+#                 clsloss = "sparse_categorical_crossentropy"
+#                lossw = [1, 3]
+                metric = tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)
+                dropout = 0
+                recurrent_dropout = 0
+                task = "classification"
+              
+                mconf = {"name": args.mname, 
+                         "units": [32, 64, 32], 
+                         "outactfn": ["softmax"], 
+                         "outshape": [len(classify[1][0]) + 1], 
+                         "loss": [clsloss], 
+                         "metric": [metric], 
+                         "earlystopper": args.earlystop,  # False 
+                         "dropout": dropout, 
+                         "recurrent_dropout": recurrent_dropout,
+                         "task": task}
+        
+                ret = main(mode="train", tperiod=tperiod, gif=gif, npyd=npyd, npysuffix="train", 
+                           db=args.dbalance, 
+                           dsrc="mdf", n_in=6, n_out=1, vinfo=vinfo, rescale=args.dscaler, classify=classify,
+                           mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+         
+            elif args.mode == "test":
+                # 3. loss: 0.1250 - categorical_accuracy: 0.9641 - val_loss: 4.3427 - val_categorical_accuracy: 0.6591 (recurrent_dropout = 0)
+                # 2. loss: 0.1273 - categorical_accuracy: 0.9639 - val_loss: 4.3539 - val_categorical_accuracy: 0.6604
+                # 1. loss: 0.1269 - categorical_accuracy: 0.9639 - val_loss: 4.2968 - val_categorical_accuracy: 0.6605
+                saved_model = "{}/{}.hdf5".format(modeld, mname)
+              
+                task = "class2step"
+                mconf = {"task": task}
+              
+                ret = main(mode="test", tperiod=tperiod, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
+                           dsrc="mdf", vinfo=vinfo, rescale=args.dscaler, classify=classify, 
+                           saved_model=saved_model, mconf=mconf, custom_objects=custom_objects, mname=mname)
+
+
+    sys.exit()
+# # training history
+
 # In[ ]:
+
+
+# In[26]:
 
 
 if __name__ == "__main__":
 #     sys.exit()
+
+    argp = argparse.add_ar
+
 #### gpu setting
     import tensorflow as tf
     
@@ -1045,7 +1522,7 @@ if __name__ == "__main__":
         except RuntimeError as e:
             print(e)
 
-###### training for historical qc ######
+###### 1. training for historical qc ######
             
 #### config
     logging.getLogger().setLevel(logging.INFO)
@@ -1054,7 +1531,7 @@ if __name__ == "__main__":
     ind    = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
     logd   = "/home/yuzhe/DataScience/QC/log"
     npyd   = "/home/yuzhe/DataScience/dataset"
-    modeld = "./model"
+    modeld = "./model/ready"
     evald  = "/NAS-129/users1/T1/DATA/RNN/QC"
     gif    = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
     
@@ -1064,13 +1541,13 @@ if __name__ == "__main__":
     if not os.path.exists(npyd):
         os.makedirs(npyd)
 
-    tperiod_train = [2012010101, 2015123124]
-    tperiod_test  = [2016010101, 2016123124]
+    tperiod_train = [1998010101, 2015123124]
+    tperiod_test  = [2016010101, 2019123124]
     
     custom_objects = {"YZKError": YZKError, "WeightedBinaryCrossntropy": WeightedBinaryCrossntropy}
     
-    epochs = 500
-    batchsize = 100
+    epochs = 100
+    batchsize = 1000
 
     # train 
 #     loss = YZKError(element_weight=[1 / 6., 1 / 6., 1 / 6., 1 / 2.], penalized=-1)
@@ -1085,28 +1562,50 @@ if __name__ == "__main__":
     mconf = {"name": "DNNLSTM", "units": [10, 30, 10, 30], "dropouts": 0.25, "activations": "relu"}
     mconf = {"name": "DNNLSTM", "units": [20, 20, 20, 60], "outactfn": ["tanh", "sigmoid"], "outshape": [4, 1], "dropouts": 0.2, "activations": "relu"}
 
-#### stackedLSTM for Temp
-    regloss = "mae"
-    loss = [regloss]
-    mconf = {"name": "stackedLSTM", "units": [32, 64], "outactfn": ["sigmoid"], "outshape": [1], "loss": loss}
+#### 1.1 stackedLSTM for Temp
+    regloss = "mae"    
+    dropout = 0
+    recurrent_dropout = 0
+    
+    vrange = {"Temp": [-20.0, 50.0]}
+    
+    vinfo = {"Temp": [-20.0, 50.0]}
+
+#     vinfo = {"Temp": [-20.0, 50.0],
+#               "RH": [0.0, 1.0],
+#               "Pres": [600.0, 1100.0]}
+    
+    # best units = [64]
+    mconf = {"name": "stackedLSTM", 
+             "units": [32, 64, 32], 
+             "outactfn": ["sigmoid"], 
+             "outshape": [len(vinfo)], 
+             "loss": [regloss], 
+             "metric": ["mae"], 
+             "earlystopper": True, 
+             "dropout": dropout, 
+             "recurrent_dropout": recurrent_dropout}
+    
     mname = "stackedLSTM_MAE_MinMaxScaler_HourlyTemp"
-   
-    vinfo = {"Temp": [-20.0, 50.0],
-              "RH": [0.0, 100.0],
-              "Pres": [600.0, 1100.0]}
     
-#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
-#                db=False, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
-#                npysuffix="trainMinMax", mname=mname, vinfo=vinfo)
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="hourlyTemp", 
+#            db=False, 
+#            dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale="MinMax",
+#            mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
     
-#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+    
+    saved_model = "{}/{}.hdf5".format(modeld, mname)
 
 #     main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
 #          db=False, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
 #          npysuffix="testMinMax", saved_model=saved_model, evald=evald, mname=mname, custom_objects=custom_objects, vinfo=vinfo, rescale="MinMax")
 
-    
-#### stackedLSTM for Precp
+#     ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=npyd, npysuffix="hourlyTemp", evald=evald, 
+#                dsrc="hrf", vrange=vrange, vinfo=vinfo, rescale="MinMax", 
+#                saved_model=saved_model, custom_objects=custom_objects, mname=mname)
+
+
+#### 1.2 stackedLSTM for Precp
 # 2012010101 - 2015123124
 # INFO:root:main-141, class (scaled): 0, nclass: 6865225
 # INFO:root:main-141, class (scaled): 1, nclass: 471860
@@ -1119,28 +1618,46 @@ if __name__ == "__main__":
     clsloss = "categorical_crossentropy"
 #     clsloss = "sparse_categorical_crossentropy"
 #     loss = [regloss, clsloss]
-    loss = clsloss
     lossw = [1, 3]
     metric = [tf.keras.metrics.CategoricalAccuracy(name="categorical_accuracy", dtype=None)]
     task = "classification"
-    dropout = 0.2
-    recurrent_dropout = 0.2
+    dropout = 0.
+    recurrent_dropout = 0.
+    
+    vrange = {"Temp": [-20.0, 50.0],
+              "RH": [0, 100],
+              "Pres": [600.0, 1100.0],
+              "Precp": [0.0, 220.0]}
+    
+    vinfo = {"Precp": [0.0, 220.0]}
+#     classify = [[3], [[0.1, 5, 10, 20]]]
+    classify = [[3], [[0.1]]]
+
     
 #     mconf = {"name": "stackedLSTM", "units": [64, 64], "outactfn": ["sigmoid", "softmax"], "outshape": [1, 5], "loss": loss}
-    mconf = {"name": "stackedLSTM", "units": [32, 64, 128, 64], "outactfn": ["softmax"], "outshape": [5], "loss": loss, "metric": metric, "earlystopper": True, "task": task, "dropout": dropout, "recurrent_dropout": recurrent_dropout}
+    mconf = {"name": "stackedLSTM", 
+             "units": [32, 64, 128, 64], 
+             "outactfn": ["softmax"], 
+             "outshape": [len(classify[1][0]) + 1], 
+             "loss": [clsloss], 
+             "metric": metric, 
+             "earlystopper": True, 
+             "task": task, 
+             "dropout": dropout, 
+             "recurrent_dropout": recurrent_dropout}
 
     mname = "stackedLSTM_MAEpCBC_MinMaxScaler_HourlyPrecp"
-
-    vinfo = {"Precp": [0.0, 220.0]}
-    classify = [[3], [[0.1, 5, 10, 20]]]
-#     classify = [[3], [[0.1]]]
-
     
 #     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, mconf=mconf, 
 #                db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
 #                npysuffix="trainMinMax", mname=mname, vinfo=vinfo, classify=classify)
     
-#     saved_model = "{}/{}.hdf5".format(modeld, mname)
+    ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="hourly", 
+               db=True, 
+               dsrc="hrf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale="MinMax", classify=classify,
+               mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+
+    saved_model = "{}/{}.hdf5".format(modeld, mname)
 
 #     main(mode="test", tperiod=tperiod_test, gif=gif, npyd=npyd, 
 #          db=True, n_in=6, n_out=1, dsrc="hrf", epochs=epochs, batchsize=batchsize, 
@@ -1231,16 +1748,16 @@ if __name__ == "__main__":
     
     mname = "stackedLSTM_MAE_MinMaxScaler_Temp10min"
     
-#    ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="temp", 
-#               db=False, 
-#               dsrc="mdf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale="MinMax",
-#               mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
+#     ret = main(mode="train", tperiod=tperiod_train, gif=gif, npyd=npyd, npysuffix="temp", 
+#                db=False, 
+#                dsrc="mdf", n_in=6, n_out=1, vrange=vrange, vinfo=vinfo, rescale="MinMax",
+#                mconf=mconf, epochs=epochs, batchsize=batchsize, mname=mname)
     
-    saved_model = "{}/{}.hdf5".format(modeld, mname)
+#     saved_model = "{}/{}.hdf5".format(modeld, mname)
 
-    ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
-               dsrc="mdf", vrange=vrange, vinfo=vinfo, rescale="MinMax", 
-               saved_model=saved_model, custom_objects=custom_objects, mname=mname)
+#     ret = main(mode="test", tperiod=tperiod_test, gif=gif, ind=ind, npyd=None, npysuffix=None, evald=evald, 
+#                dsrc="mdf", vrange=vrange, vinfo=vinfo, rescale="MinMax", 
+#                saved_model=saved_model, custom_objects=custom_objects, mname=mname)
 
 #### 2.2 stackedLSTM for Precp 10min
 # 201801010100 - 202007312350
@@ -1295,34 +1812,17 @@ if __name__ == "__main__":
 #                mconf=mconf, saved_model=saved_model, custom_objects=custom_objects, mname=mname)
 
 
-# # dgenerator
+# # training history
 
 # In[ ]:
 
 
 if __name__ == "__main__":
     
-    logging.getLogger().setLevel(logging.INFO)
-    
-    ind = "/NAS-129/users1/T1/DATA/YY/ORG/HR1"
-    npyd = "/home/yuzhe/DataScience/dataset"
-    
-    tperiod_train = [2012010101, 2015123124]
-    tperiod_test  = [2016010101, 2016123124]
-
-    # stninfo = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/RR_analysis_grid_stationlist.txt"
-    gif = "/home/yuzhe/CODE/ProgramT1/GRDTools/SRC/RES/GI/1500_decode_stationlist_without_space.txt"
-    
-    hrdg = dgenerator(ind=ind, gif=gif, npyd=npyd)
-    hrfs_train = hrdg.hrfgenerator(tperiod_train, n_in=6, n_out=1, mode="train", rescale=True, reformat=True, vstack=True, fnpy=True, generator=False)
-
-    
-#     X = np.reshape(hrfs_test[0][:, :, 0:-4], (-1, nstn, 6, 4))
-#     y = hrfs_test[-1]
-#     print("shape, X: {}, y: {}".format(X.shape, y.shape))
-
-#     datetimes = hrfs_test[1]
-#     stnids = hrfs_test[2]
+    fig, ax = plt.subplots(2)
+    ax[0].plot(ret[0].history["loss"])
+    ax[0].plot(ret[0].history["val_loss"])
+    ax[1].plot(ret[0].history["lr"])
 
 
 # ## LSTM inputs: A 3D tensor with shape [batch, timesteps, feature].

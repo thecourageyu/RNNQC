@@ -6,11 +6,14 @@ echo $WORKDIR
 cd ${WORKDIR}
 
 QCScript="./RNNQC.py"
-sdtime=1998010101
-edtime=2015123124
-vname=PrecpMAEpCCE
-mname=CNN1D
-dsrc=hrf
+sdtime=202011010100
+edtime=202011302350
+#vname=PrecpMAEpCCE
+vname=Temp
+#mname=CNN1D
+mname=stackedLSTM
+#dsrc=hrf
+dsrc=mdf
 
 TIME_STEP=6
 
